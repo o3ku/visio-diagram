@@ -7,6 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from font_support import DEFAULT_CJK_FONT as _DEFAULT_CJK, DEFAULT_LATIN_FONT as _DEFAULT_LATIN
+from theme import XML_PALETTES as _XML_PALETTES, xml_palette as _xml_palette
 
 def _find_fonts():
     """PNG 预览用的中文字体（Visio XML 里写 ASIAN 指定的字体族）。
@@ -52,31 +53,47 @@ def _font(bold, px):
 LATIN = _DEFAULT_LATIN
 ASIAN = os.environ.get('VISIO_FONT_CJK', _DEFAULT_CJK)
 
-# palette
+# palette —— 唯一来源是 scripts/theme.py 的 XML_PALETTES（与 COM 主题共用注册表）。
+# 下面几个名字只为兼容旧代码保留，值即默认主题 tech-cn 的对应色。
 NAVY = '#1F3864'
 BLUE = '#2F5597'
 LINE = '#2E5C8A'
 GRAY = '#7F7F7F'
 TXT = '#1A1A1A'
 
-STYLES = {
-    #        fill      line     dash  text     bold  size  lw
-    'node':  ('#FFFFFF', LINE,  0, TXT,      0, 9.0, 0.75),
-    'key':   ('#DCE8F5', LINE,  0, NAVY,     1, 9.0, 0.75),
-    'dark':  (NAVY,     NAVY,   0, '#FFFFFF', 1, 9.0, 0.75),
-    'ext':   ('#F2F2F2', GRAY,  1, '#404040', 0, 9.0, 0.75),
-    'ok':    ('#E2F0D9', '#548235', 0, '#385723', 0, 9.0, 0.75),
-    'warn':  ('#FBE5D6', '#C55A11', 0, '#843C0C', 0, 9.0, 0.75),
-    'soft':  ('#F3F6FA', '#A6B9D0', 0, '#1F3864', 0, 8.5, 0.5),
-    'text':  (None,      None,   0, TXT,      0, 9.0, 0),
-    'title': (None,      None,   0, NAVY,     1, 10.0, 0),
-    'note':  (None,      None,   0, '#595959', 0, 8.0, 0),
-    'label': ('#FFFFFF', None,   0, '#404040', 0, 8.0, 0),
-    'band':  (BLUE,      BLUE,   0, '#FFFFFF', 1, 9.0, 0.75),
-}
+# 默认主题 tech-cn 的样式表（原有值，原样保留；新主题见 theme.XML_PALETTES）
+STYLES = _xml_palette('tech-cn')['styles']
+DEFAULT_THEME = 'tech-cn'
+_default_theme = DEFAULT_THEME
+
+
+def set_default_theme(name):
+    """供 build_vsdx.py / build_docx.py 的 --theme 使用：之后新建的 Fig 默认用该主题。
+    显式传 theme= 的 Fig 不受影响。未知主题名立即报错。"""
+    global _default_theme
+    _xml_palette(name)  # 校验名字
+    _default_theme = name
+
+
+def get_default_theme():
+    return os.environ.get('VISIO_THEME', _default_theme)
+
+
+def list_themes():
+    return sorted(_XML_PALETTES)
+
 
 class Fig:
-    def __init__(self, W, H):
+    def __init__(self, W, H, theme=None):
+        # theme：主题名（'tech-cn' 默认）、Theme 实例，或 None（用默认主题，
+        # 可由 set_default_theme() / build 脚本的 --theme / 环境变量 VISIO_THEME 改）
+        if theme is None:
+            theme = get_default_theme()
+        if hasattr(theme, 'name'):
+            theme = theme.name
+        self.theme = theme
+        self.palette = _xml_palette(theme)
+        self.styles = self.palette['styles']
         self.W, self.H = W, H
         self.items = []  # draw order
         self.boxes = {}
@@ -87,8 +104,8 @@ class Fig:
             raise ValueError(f"align 只能是 'l' / 'c' / 'r'，收到 {align!r}")
         if valign not in ('t', 'm'):
             raise ValueError(f"valign 只能是 't' / 'm'，收到 {valign!r}")
-        if style not in STYLES:
-            raise ValueError(f'未知样式 {style!r}，可选：{", ".join(STYLES)}')
+        if style not in self.styles:
+            raise ValueError(f'未知样式 {style!r}，可选：{", ".join(self.styles)}')
         if id and id in self.boxes:
             raise ValueError(f'形状 id {id!r} 重复')
         b = dict(kind='box', id=id, x=x, y=y, w=w, h=h, text=text, style=style, align=align, r=r,
@@ -131,7 +148,7 @@ class Fig:
             best = max(range(len(pts) - 1), key=lambda i: math.dist(pts[i], pts[i + 1]))
             (x1, y1), (x2, y2) = pts[best], pts[best + 1]
             lpos = ((x1 + x2) / 2, (y1 + y2) / 2)
-        l = dict(kind='line', pts=pts, dashed=dashed, arrow=arrow, color=color or (GRAY if dashed else LINE), lw=lw,
+        l = dict(kind='line', pts=pts, dashed=dashed, arrow=arrow, color=color or (self.palette['conn_dashed'] if dashed else self.palette['conn_line']), lw=lw,
                  src=src, dst=dst, label=label, lpos=lpos)
         self.items.append(l)
         return l
@@ -177,11 +194,11 @@ class Fig:
             if it['kind'] == 'container':
                 x0, y0, x1, y1 = it['x'] * S, it['y'] * S, (it['x'] + it['w']) * S, (it['y'] + it['h']) * S
                 if it['dashed']:
-                    dashed_poly(d, [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], '#8EA9C1', max(1, int(0.75 * 0.3528 * S)), S)
+                    dashed_poly(d, [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], self.palette['container_line'], max(1, int(0.75 * 0.3528 * S)), S)
                 else:
-                    d.rectangle([x0, y0, x1, y1], fill='#F7F9FC', outline='#8EA9C1', width=max(1, int(0.75 * 0.3528 * S)))
+                    d.rectangle([x0, y0, x1, y1], fill=self.palette['container_fill'], outline=self.palette['container_line'], width=max(1, int(0.75 * 0.3528 * S)))
             elif it['kind'] == 'box':
-                fill, line, dash, tc, bold, size, lw = STYLES[it['style']]
+                fill, line, dash, tc, bold, size, lw = self.styles[it['style']]
                 x0, y0, x1, y1 = it['x'] * S, it['y'] * S, (it['x'] + it['w']) * S, (it['y'] + it['h']) * S
                 rr = it['r'] * S
                 wpx = max(1, round(lw * 0.3528 * S))
@@ -224,7 +241,7 @@ class Fig:
                     lx, ly = P(it['lpos'])
                     tw = (textwidth(it['label'], 8.0) + 2.5) * S
                     d.rectangle([lx - tw / 2, ly - 2.4 * S, lx + tw / 2, ly + 2.4 * S], fill='#FFFFFF')
-                    d.text((lx, ly), it['label'], font=fnt, fill='#404040', anchor='mm')
+                    d.text((lx, ly), it['label'], font=fnt, fill=self.palette['label_text'], anchor='mm')
                 if it['arrow'] in ('end', 'both'):
                     arrowhead(d, pts[-2], pts[-1], ah, it['color'])
                 if it['arrow'] in ('start', 'both'):
@@ -236,7 +253,7 @@ class Fig:
         """Shapes a connector end may attach to: bordered boxes and containers (not plain text, not container title bands)."""
         tg = []
         for k, it in enumerate(self.items):
-            if it['kind'] == 'container' or (it['kind'] == 'box' and STYLES[it['style']][1] and not it.get('band_of')):
+            if it['kind'] == 'container' or (it['kind'] == 'box' and self.styles[it['style']][1] and not it.get('band_of')):
                 tg.append(k)
         return tg
 
@@ -359,10 +376,10 @@ class Fig:
         # shapes first, so connector formulas can reference their sheet ids
         for k, it in enumerate(self.items):
             if it['kind'] == 'container':
-                rect_shape(k, it['x'], it['y'], it['w'], it['h'], None if it['dashed'] else '#F7F9FC', '#8EA9C1',
+                rect_shape(k, it['x'], it['y'], it['w'], it['h'], None if it['dashed'] else self.palette['container_fill'], self.palette['container_line'],
                            it['dashed'], 0.75)
             elif it['kind'] == 'box':
-                fill, line, dash, tc, bold, size, lw = STYLES[it['style']]
+                fill, line, dash, tc, bold, size, lw = self.styles[it['style']]
                 bd = it['bold'] if it['bold'] is not None else bold
                 rect_shape(k, it['x'], it['y'], it['w'], it['h'], fill, line, dash, lw, it['text'], tc,
                            it['size'] or size, bd, it['align'], it['r'], it['valign'])
@@ -418,7 +435,7 @@ class Fig:
                          f'<Cell N="TxtAngle" V="0"/><Cell N="TextBkgnd" V="#FFFFFF" F="RGB(255,255,255)"/>'
                          '<Cell N="TextBkgndTrans" V="0"/><Cell N="VerticalAlign" V="1"/>'
                          '<Cell N="LeftMargin" V="0"/><Cell N="RightMargin" V="0"/><Cell N="TopMargin" V="0"/><Cell N="BottomMargin" V="0"/>')
-                body += char('#404040', 8.0, 0)
+                body += char(self.palette['label_text'], 8.0, 0)
                 body += '<Section N="Paragraph"><Row IX="0"><Cell N="HorzAlign" V="1"/></Row></Section>'
             body += (f'<Section N="Geometry" IX="0"><Cell N="NoFill" V="1"/><Cell N="NoLine" V="0"/><Cell N="NoShow" V="0"/>'
                      + ''.join(rows) + '</Section>')

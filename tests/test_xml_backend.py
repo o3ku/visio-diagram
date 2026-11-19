@@ -139,6 +139,99 @@ class TestVlib(unittest.TestCase):
             self.assertGreater(os.path.getsize(p), 1000)
 
 
+def _lum(hexcolor):
+    r, g, b = (int(hexcolor[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = f(r), f(g), f(b)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _contrast(a, b):
+    la, lb = _lum(a), _lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def _themed_fig(theme):
+    f = Fig(100, 60, theme=theme)
+    f.container('grp', 5, 5, 90, 50, '分组')
+    f.box('a', 10, 15, 30, 12, '节点', 'node')
+    f.box('k', 55, 15, 30, 12, '重点', 'key')
+    f.box('d', 10, 35, 30, 12, '关键', 'dark')
+    f.box('o', 55, 35, 15, 12, '通过', 'ok')
+    f.box('w', 72, 35, 15, 12, '异常', 'warn')
+    f.conn('a', 'r', 'k', 'l', label='是')
+    return f
+
+
+class TestThemes(unittest.TestCase):
+    def test_registered_in_both_routes(self):
+        """COM 主题注册表与 XML 色板注册表同名同义，不缺不漏。"""
+        import theme
+        self.assertEqual(sorted(vlib.list_themes()), sorted(theme.THEMES))
+        self.assertEqual(sorted(vlib.list_themes()),
+                         ['mono', 'tech-cn'])
+        for name in vlib.list_themes():
+            theme.get(name)  # COM 路线能取到
+            theme.xml_palette(name)  # XML 路线能取到
+
+    def test_default_is_tech_cn_and_unchanged(self):
+        f = Fig(50, 20)
+        self.assertEqual(f.theme, 'tech-cn')
+        self.assertEqual(vlib.STYLES['dark'], ('#1F3864', '#1F3864', 0, '#FFFFFF', 1, 9.0, 0.75))
+        self.assertEqual(vlib.STYLES['node'][0], '#FFFFFF')
+        with self.assertRaises(KeyError):
+            Fig(50, 20, theme='nope')
+        with self.assertRaises(KeyError):
+            vlib.set_default_theme('nope')
+
+    def test_each_theme_renders_glues_and_parses(self):
+        for name in vlib.list_themes():
+            f = _themed_fig(name)
+            root = page_root(f)
+            glued, ends = f.glue_report()
+            self.assertEqual((glued, ends), (2, 2), name)
+            with tempfile.TemporaryDirectory() as d:
+                p = os.path.join(d, 'x.png')
+                f.render_png(p, S=4)
+                self.assertGreater(os.path.getsize(p), 1000, name)
+
+    def test_theme_colors_in_xml(self):
+        expect = {'tech-cn': '#1F3864', 'mono': '#000000'}
+        for name, color in expect.items():
+            xml = _themed_fig(name).visio_xml()
+            self.assertIn(color, xml, name)
+        # mono 产物是纯灰阶（除白底外所有填充/线条色 r==g==b）
+        xml = _themed_fig('mono').visio_xml()
+        for m in re.finditer(r'(?:FillForegnd|LineColor|Color)" V="(#[0-9A-Fa-f]{6})"', xml):
+            h = m.group(1)
+            self.assertEqual(h[1:3], h[3:5], (h, 'mono 混入彩色'))
+            self.assertEqual(h[3:5], h[5:7], (h, 'mono 混入彩色'))
+        self.assertNotIn('#1F3864', xml)
+
+    def test_text_fill_contrast(self):
+        """每套主题的文字/填充对比度 ≥ 4.5:1（含 8pt note）。"""
+        for name in vlib.list_themes():
+            styles = vlib._xml_palette(name)['styles']
+            for role in ('node', 'key', 'dark', 'ok', 'warn', 'soft', 'band'):
+                fill, _line, _dash, text, _b, _s, _lw = styles[role]
+                self.assertGreaterEqual(_contrast(text, fill), 4.5, (name, role))
+            self.assertGreaterEqual(_contrast(styles['note'][3], '#FFFFFF'), 4.5, (name, 'note'))
+
+    def test_set_default_theme_and_cli(self):
+        vlib.set_default_theme('mono')
+        self.addCleanup(vlib.set_default_theme, 'tech-cn')
+        self.assertEqual(Fig(50, 20).theme, 'mono')
+        # 显式 theme= 不受默认影响
+        self.assertEqual(Fig(50, 20, theme='mono').theme, 'mono')
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, 'out')
+            subprocess.run([sys.executable, os.path.join(XB, 'build_vsdx.py'),
+                            EXAMPLE, out, '--theme', 'mono'], check=True, capture_output=True)
+            with zipfile.ZipFile(os.path.join(out, 'figdemo-1.vsdx')) as z:
+                self.assertIn('#000000', z.read('visio/pages/page1.xml').decode())
+                self.assertNotIn('#1F3864', z.read('visio/pages/page1.xml').decode())
+
+
 def make_docx(path, vsdx_bytes):
     ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
           '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -240,6 +333,21 @@ class TestPipeline(unittest.TestCase):
         env = dict(os.environ, PYTHONIOENCODING='utf-8')
         r = subprocess.run([sys.executable, os.path.join(XB, 'inspect_visio_docx.py'), out], capture_output=True, text=True, encoding='utf-8', env=env, check=True)
         self.assertIn('问题：无', r.stdout)
+
+    def test_build_docx_theme_kwarg(self):
+        src = os.path.join(self.d, 'src.docx')
+        make_docx(src, self.blank_bytes)
+        tpl, out = os.path.join(self.d, 'tpl'), os.path.join(self.d, 'out-mono.docx')
+        import build_docx, extract_vsdx, vlib as _vlib
+        self.addCleanup(_vlib.set_default_theme, 'tech-cn')
+        with contextlib.redirect_stdout(io.StringIO()):
+            extract_vsdx.main(src, tpl)
+            build_docx.build(src, EXAMPLE, tpl, out, theme='mono')
+        with zipfile.ZipFile(out) as z:
+            with zipfile.ZipFile(io.BytesIO(z.read('word/embeddings/Microsoft_Visio_Drawing.vsdx'))) as v:
+                page = v.read('visio/pages/page1.xml').decode()
+        self.assertIn('#000000', page)
+        self.assertNotIn('#1F3864', page)
 
     def test_bad_suffix_message(self):
         src = os.path.join(self.d, 'src.docx')

@@ -7,6 +7,7 @@
 import argparse, importlib.util, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vsdxpkg import BLANK, build_vsdx
+from vlib import list_themes, set_default_theme
 
 
 def load(path):
@@ -20,7 +21,11 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('figspecs'); ap.add_argument('outdir'); ap.add_argument('only', nargs='*')
     ap.add_argument('--template', default=BLANK)
+    ap.add_argument('--theme', default=None, choices=list_themes(),
+                    help='全图统一主题（默认 tech-cn；一份文档只用一套，见 references/visio-style-rules.md §6）')
     a = ap.parse_args()
+    if a.theme:
+        set_default_theme(a.theme)
     os.makedirs(a.outdir, exist_ok=True)
     for name, _suf, fn in load(a.figspecs):
         if a.only and name not in a.only:
