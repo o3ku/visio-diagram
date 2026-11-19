@@ -95,6 +95,19 @@ python scripts/doc_consistency.py  # docs-vs-code consistency
 
 Full reference: [SKILL.md](SKILL.md) and [references/](references/).
 
+
+## Cross-platform XML backend (no Visio required)
+
+`scripts/xml_backend/` writes Visio page XML directly and packages it as `.vsdx`, so figures can be generated on Linux / macOS / Windows without Visio or pywin32. Output stays natively editable: connection points, glued endpoints and connector-carried text follow the Visio schema. Word previews are high-DPI PNG instead of EMF; on Windows with Visio, `visio_finish.py` can optionally verify the drawings (cached values, glue, automated drag test), recalculate, export EMF and re-save.
+
+```
+pip install pillow
+python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/
+python -m unittest discover -s tests -v   # no Visio needed
+```
+
+See [references/cross-platform.md](references/cross-platform.md).
+
 ## Known Limitations
 
 1. Free-end connectors (legend lines, ticks, bus stubs) show a selection bounding box; graphical correctness is prioritized.

@@ -60,6 +60,8 @@ uv venv --python 3.12 .venv-vision && .venv-vision/Scripts/pip install pywin32 p
 .venv-vision/Scripts/python scripts/selftest.py
 ```
 
+**没有 Visio 的环境**（Linux / macOS、CI、Agent 沙箱）：改用 `scripts/xml_backend/`，直接生成可编辑的 vsdx 并写回 docx，见 `references/cross-platform.md`。
+
 **PowerShell 无法实例化 COM**（安全策略拦截）—— 必须走 Python。详见 `references/pitfalls.md` 第 1 条。
 
 ---

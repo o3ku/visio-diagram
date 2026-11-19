@@ -101,6 +101,19 @@ python scripts/doc_consistency.py  # 文档-代码一致性
 
 完整参考见 [SKILL.md](SKILL.md) 与 [references/](references/)。
 
+
+## 跨平台 XML 后端（不需要 Visio）
+
+`scripts/xml_backend/` 直接生成 Visio 页面 XML 并打包为 `.vsdx`，在 Linux / macOS / Windows 上都能出图，不需要 Visio 和 pywin32。产物仍可在 Visio 中原生编辑：连接点、端点粘附、连线自带文本都按 Visio 规范写入。Word 预览为高 DPI PNG；有 Windows + Visio 时，可用 `visio_finish.py` 做可选的验证与收尾（缓存值、粘附、自动拖动测试、重算、导出 EMF、另存）。
+
+```
+pip install pillow
+python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/
+python -m unittest discover -s tests -v   # 不需要 Visio
+```
+
+详见 [references/cross-platform.md](references/cross-platform.md)。
+
 ## 已知限制
 
 1. 自由端连接线（图例线 / 刻度 / 总线引出）选中时仍显示包围盒；本库取「图形正确优先」。
