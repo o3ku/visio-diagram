@@ -26,6 +26,6 @@ if __name__ == '__main__':
         if a.only and name not in a.only:
             continue
         f = fn()
-        build_vsdx(f, a.template, os.path.join(a.outdir, f'fig{name}.vsdx'), os.path.join(a.outdir, '.work', name))
+        build_vsdx(f, a.template, os.path.join(a.outdir, f'fig{name}.vsdx'))
         f.render_png(os.path.join(a.outdir, f'fig{name}.png'), S=10)
         print(name, f'{f.W}x{f.H}mm')

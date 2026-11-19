@@ -103,6 +103,7 @@ Full reference: [SKILL.md](SKILL.md) and [references/](references/).
 ```
 pip install pillow
 python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/
+python -m unittest discover -s tests -v   # no Visio needed
 ```
 
 See [references/cross-platform.md](references/cross-platform.md).

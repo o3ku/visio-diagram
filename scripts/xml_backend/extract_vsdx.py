@@ -6,7 +6,7 @@
       并打印“正文顺序 → 嵌入文件”对照表，用来填写 figspecs.py 里的 FIGS。
 只读原稿。依赖：Python 3 标准库。
 """
-import os, re, sys, zipfile
+import os, re, shutil, sys, zipfile
 
 
 def main(docx, out):
@@ -24,6 +24,7 @@ def main(docx, out):
                 continue
             name = os.path.basename(emb[0])
             dst = os.path.join(out, name[:-5])
+            shutil.rmtree(dst, ignore_errors=True)   # 先清空，避免上次解出的旧部件残留进新 vsdx
             with zipfile.ZipFile(z.open('word/' + emb[0])) as v:
                 v.extractall(dst)
             n += 1

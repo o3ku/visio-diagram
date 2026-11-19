@@ -5,21 +5,23 @@ from PIL import Image, ImageDraw, ImageFont
 from xml.sax.saxutils import escape
 
 def _find_fonts():
-    """PNG 预览用的中文字体（Visio XML 里始终写微软雅黑）。
-    查找顺序：环境变量 VISIO_KIT_FONT_R / VISIO_KIT_FONT_B → Windows 微软雅黑 → 常见 Noto/思源 CJK。"""
+    """PNG 预览用的中文字体（Visio XML 里始终写微软雅黑）。返回 ((常规路径, ttc序号), (粗体路径, ttc序号))。
+    查找顺序：环境变量 VISIO_KIT_FONT_R / VISIO_KIT_FONT_B（.ttc 序号用 VISIO_KIT_FONT_INDEX）→ Windows 微软雅黑
+    → Noto Sans CJK（.ttc 第 0 个是日文字形，简体中文取第 2 个）→ 苹方。"""
     env_r, env_b = os.environ.get('VISIO_KIT_FONT_R'), os.environ.get('VISIO_KIT_FONT_B')
     if env_r:
-        return env_r, env_b or env_r
+        idx = int(os.environ.get('VISIO_KIT_FONT_INDEX', '0'))
+        return (env_r, idx), (env_b or env_r, idx)
     cands = [
-        ('C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/msyhbd.ttc'),
-        ('/System/Library/Fonts/PingFang.ttc', '/System/Library/Fonts/PingFang.ttc'),
-        ('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'),
-        ('/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc', '/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc'),
-        ('/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc', '/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc'),
+        ('C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/msyhbd.ttc', 0),
+        ('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc', 2),
+        ('/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc', '/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc', 2),
+        ('/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc', '/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc', 2),
+        ('/System/Library/Fonts/PingFang.ttc', '/System/Library/Fonts/PingFang.ttc', 0),
     ]
-    for r, b in cands:
+    for r, b, idx in cands:
         if os.path.exists(r):
-            return r, b if os.path.exists(b) else r
+            return (r, idx), (b if os.path.exists(b) else r, idx)
     raise RuntimeError('找不到中文字体：请设置环境变量 VISIO_KIT_FONT_R（及可选 VISIO_KIT_FONT_B）指向 .ttf/.otf/.ttc')
 
 
@@ -31,6 +33,13 @@ def _fonts():
     if FONT_R is None:
         FONT_R, FONT_B = _find_fonts()
     return FONT_R, FONT_B
+
+
+def _font(bold, px):
+    path, idx = _fonts()[1 if bold else 0]
+    return ImageFont.truetype(path, px, index=idx)
+
+
 LATIN = 'Microsoft YaHei'
 ASIAN = '微软雅黑'
 
@@ -65,6 +74,14 @@ class Fig:
 
     # ---- primitives
     def box(self, id, x, y, w, h, text='', style='node', align='c', r=0, size=None, bold=None, valign='m'):
+        if align not in ('l', 'c', 'r'):
+            raise ValueError(f"align 只能是 'l' / 'c' / 'r'，收到 {align!r}")
+        if valign not in ('t', 'm'):
+            raise ValueError(f"valign 只能是 't' / 'm'，收到 {valign!r}")
+        if style not in STYLES:
+            raise ValueError(f'未知样式 {style!r}，可选：{", ".join(STYLES)}')
+        if id and id in self.boxes:
+            raise ValueError(f'形状 id {id!r} 重复')
         b = dict(kind='box', id=id, x=x, y=y, w=w, h=h, text=text, style=style, align=align, r=r,
                  size=size, bold=bold, valign=valign)
         self.items.append(b)
@@ -76,23 +93,31 @@ class Fig:
         return self.box(None, x, y, w, h, text, style, align, 0, size, bold, valign)
 
     def container(self, id, x, y, w, h, title, dashed=False, band=True, tw=None):
+        if id and id in self.boxes:
+            raise ValueError(f'形状 id {id!r} 重复')
         c = dict(kind='container', id=id, x=x, y=y, w=w, h=h, title=title, dashed=dashed, band=band)
         self.items.append(c)
         self.boxes[id] = dict(x=x, y=y, w=w, h=h)
         if title and band:
             bw = tw or max(30, len(title) * 3.6 + 8)
-            self.box(None, x, y, bw, 6.5, title, 'band', 'c', 0)
+            self.box(None, x, y, bw, 6.5, title, 'band', 'c', 0)['band_of'] = id
         elif title:
             self.box(None, x + 2, y + 1, w - 4, 6, title, 'title', 'l', 0)
         return c
 
     def anchor(self, id, side, f=0.5):
+        if id not in self.boxes:
+            raise KeyError(f'未定义的形状 id {id!r}（先用 box()/container() 创建，再连线）')
+        if side not in ('t', 'b', 'l', 'r'):
+            raise ValueError(f"side 只能是 't' / 'b' / 'l' / 'r'，收到 {side!r}")
         b = self.boxes[id]
         x, y, w, h = b['x'], b['y'], b['w'], b['h']
         return {'t': (x + w * f, y), 'b': (x + w * f, y + h), 'l': (x, y + h * f), 'r': (x + w, y + h * f)}[side]
 
     def line(self, pts, dashed=False, arrow='end', color=None, label=None, lpos=None, lw=1.0, src=None, dst=None):
         # label is the connector's own text (Visio connector Text), not a separate text shape
+        if len(pts) < 2:
+            raise ValueError(f'连线至少需要 2 个点，收到 {len(pts)} 个')
         if label and lpos is None:
             best = max(range(len(pts) - 1), key=lambda i: math.dist(pts[i], pts[i + 1]))
             (x1, y1), (x2, y2) = pts[best], pts[best + 1]
@@ -143,7 +168,6 @@ class Fig:
             if it['kind'] == 'container':
                 x0, y0, x1, y1 = it['x'] * S, it['y'] * S, (it['x'] + it['w']) * S, (it['y'] + it['h']) * S
                 if it['dashed']:
-                    d.rectangle([x0, y0, x1, y1], fill='#FFFFFF')
                     dashed_poly(d, [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], '#8EA9C1', max(1, int(0.75 * 0.3528 * S)), S)
                 else:
                     d.rectangle([x0, y0, x1, y1], fill='#F7F9FC', outline='#8EA9C1', width=max(1, int(0.75 * 0.3528 * S)))
@@ -162,7 +186,7 @@ class Fig:
                 if it['text']:
                     sz = it['size'] or size
                     bd = it['bold'] if it['bold'] is not None else bold
-                    fnt = ImageFont.truetype(_fonts()[1] if bd else _fonts()[0], int(round(sz * 0.3528 * S)))
+                    fnt = _font(bd, int(round(sz * 0.3528 * S)))
                     lines = it['text'].split('\n')
                     lh = sz * 0.3528 * 1.25 * S
                     tot = lh * len(lines)
@@ -174,6 +198,8 @@ class Fig:
                         yy = ty + lh * (i + 0.5)
                         if it['align'] == 'l':
                             d.text((x0 + 1.5 * S, yy), ln, font=fnt, fill=tc, anchor='lm')
+                        elif it['align'] == 'r':
+                            d.text((x1 - 1.5 * S, yy), ln, font=fnt, fill=tc, anchor='rm')
                         else:
                             d.text(((x0 + x1) / 2, yy), ln, font=fnt, fill=tc, anchor='mm')
             elif it['kind'] == 'line':
@@ -185,7 +211,7 @@ class Fig:
                     d.line(pts, fill=it['color'], width=wpx, joint='curve')
                 ah = 2.2 * S
                 if it.get('label'):
-                    fnt = ImageFont.truetype(_fonts()[0], int(round(8.0 * 0.3528 * S)))
+                    fnt = _font(False, int(round(8.0 * 0.3528 * S)))
                     lx, ly = P(it['lpos'])
                     tw = (textwidth(it['label'], 8.0) + 2.5) * S
                     d.rectangle([lx - tw / 2, ly - 2.4 * S, lx + tw / 2, ly + 2.4 * S], fill='#FFFFFF')
@@ -198,10 +224,10 @@ class Fig:
 
     # ---------- glue helpers ----------
     def _glue_targets(self):
-        """Shapes a connector end may attach to: bordered boxes and containers (not plain text)."""
+        """Shapes a connector end may attach to: bordered boxes and containers (not plain text, not container title bands)."""
         tg = []
         for k, it in enumerate(self.items):
-            if it['kind'] == 'container' or (it['kind'] == 'box' and STYLES[it['style']][1]):
+            if it['kind'] == 'container' or (it['kind'] == 'box' and STYLES[it['style']][1] and not it.get('band_of')):
                 tg.append(k)
         return tg
 
@@ -312,7 +338,7 @@ class Fig:
                      f'<Cell N="VerticalAlign" V="{0 if valign=="t" else 1}"/>']
             body = ''.join(cells)
             body += char(tc, size, bold)
-            body += f'<Section N="Paragraph"><Row IX="0"><Cell N="HorzAlign" V="{0 if align=="l" else 1}"/><Cell N="SpLine" V="-1.15" U="PER"/></Row></Section>'
+            body += f'<Section N="Paragraph"><Row IX="0"><Cell N="HorzAlign" V="{ {'l': 0, 'c': 1, 'r': 2}[align] }"/><Cell N="SpLine" V="-1.15" U="PER"/></Row></Section>'
             if k in cpts:
                 body += conn_section(wi, hi, cpts[k])
             body += rect_geom(wi, hi, 0 if fill else 1, 0 if line else 1)
@@ -342,8 +368,8 @@ class Fig:
             rows = []
             for j, (px, py) in enumerate(pts):
                 lx, ly = px - bx, py - by
-                fxs = f' F="Width*{lx / W_:.6f}"' if abs(W_) > 1e-6 else ''
-                fys = f' F="Height*{ly / H_:.6f}"' if abs(H_) > 1e-6 else ''
+                fxs = f' F="{_span_formula("Width", lx, W_, j, len(pts))}"'
+                fys = f' F="{_span_formula("Height", ly, H_, j, len(pts))}"'
                 rows.append(f'<Row T="{"MoveTo" if j == 0 else "LineTo"}" IX="{j+1}">'
                             f'<Cell N="X" V="{lx:.6f}"{fxs}/><Cell N="Y" V="{ly:.6f}"{fys}/></Row>')
             # ends: glue to a connection point of the shape at that end
@@ -375,8 +401,8 @@ class Fig:
                 lx, ly = it['lpos']
                 tw, th = I(textwidth(lab, 8.0) + 2.5), I(4.8)
                 tx, ty = I(lx) - bx, I(H - ly) - by
-                txs = f' F="Width*{tx / W_:.6f}"' if abs(W_) > 1e-6 else ''
-                tys = f' F="Height*{ty / H_:.6f}"' if abs(H_) > 1e-6 else ''
+                txs = f' F="{_span_formula("Width", tx, W_)}"'
+                tys = f' F="{_span_formula("Height", ty, H_)}"'
                 body += (f'<Cell N="TxtPinX" V="{tx:.6f}"{txs}/><Cell N="TxtPinY" V="{ty:.6f}"{tys}/>'
                          f'<Cell N="TxtWidth" V="{tw:.6f}"/><Cell N="TxtHeight" V="{th:.6f}"/>'
                          f'<Cell N="TxtLocPinX" V="{tw/2:.6f}" F="TxtWidth*0.5"/><Cell N="TxtLocPinY" V="{th/2:.6f}" F="TxtHeight*0.5"/>'
@@ -398,6 +424,26 @@ class Fig:
             xml += '<Connects>' + ''.join(connects) + '</Connects>'
         xml += '</PageContents>'
         return xml
+
+
+def _span_formula(dim, off, span, j=None, n=None):
+    """连线几何点 / 文字位置（相对 Begin 的偏移，英寸）的公式，保证端点被拖动后线身随之伸缩。
+    span 非零：dim*比例。span 为零（纯竖线的 X、纯横线的 Y）：首点 dim*0、末点 dim*1，
+    中间点按序号就近跟随首端或末端并保留原偏移（mm）；文字位置（j=None）跟随中点。"""
+    if abs(span) > 1e-6:
+        return f'{dim}*{off / span:.6f}'
+    if j is None:
+        k = 0.5
+    elif j == 0:
+        k = 0
+    elif j == n - 1:
+        k = 1
+    else:
+        k = 0 if j <= (n - 1) / 2 else 1
+    if abs(off) < 1e-6:
+        return f'{dim}*{k:g}'
+    sign = '-' if off < 0 else '+'
+    return f'{dim}*{k:g}{sign}{abs(off) * 25.4:.4f} mm'
 
 
 def textwidth(s, pt):

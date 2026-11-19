@@ -143,7 +143,7 @@
    ```
    `FromPart`：起点 9、终点 12；`ToPart` = 100 + 连接点行号 IX。
 4. **连线自身的尺寸用公式跟随端点**（不旋转，Angle=0）：`PinX=(BeginX+EndX)/2`、`PinY=(BeginY+EndY)/2`、`Width=EndX-BeginX`、`Height=EndY-BeginY`、`LocPinX=Width*0.5`、`LocPinY=Height*0.5`。局部坐标原点即起点，终点在 (Width, Height)，宽高可为负或 0。
-5. **折线几何按比例写公式**：每个点 X 写 `Width*(x/W)`、Y 写 `Height*(y/H)`；W 或 H 为 0 的方向只写数值。这样 L 形、Z 形折线在端点移动后仍保持直角。
+5. **折线几何每个点都写公式**：X 写 `Width*(x/W)`、Y 写 `Height*(y/H)`。W 或 H 为 0 的方向（纯竖线的 X、纯横线的 Y）不能只写数值，否则横向拖动目标后端点跟过去、线身却不动：首点写 `Width*0`、末点写 `Width*1`，中间点按序号就近跟随首端或末端并保留原偏移（如 `Width*0+5 mm`）；`TxtPinX/Y` 同理，零跨度时跟随中点。这样 L 形、Z 形折线在端点移动后仍保持直角，直线变斜线时线身与端点不脱节。
 6. **设为可路由连线**：`ObjType=2`、`ShapeRouteStyle=1`（直角）、`ConLineRouteExt=1`、`ConFixedCode=0`。Visio 重新布线时可能调整折点位置，属正常现象。
 7. **端点必须精确落在形状边框上**（容差 ≤ 0.3 mm），否则找不到粘附目标。自动识别时取边框包含该点的最小形状，不粘到纯文字框。
 8. **不要从线中间引出分支**：线中点不是形状，无法粘附。分支线改为从源形状边上引出，前一段与主线重叠走同一路径，外观不变，两端都能粘附。
@@ -151,7 +151,7 @@
 
 ### 7.3 连线文字
 - 连线文字写在**连线自身的文本**里，不另建文本框；这样拖动连线或形状时文字随线移动，删除连线时一起删除。
-- 写法：在连线 Shape 中加 `TxtPinX/TxtPinY`（按 Width/Height 比例写公式，放最长线段中点）、`TxtWidth/TxtHeight`、`TxtLocPinX=TxtWidth*0.5`、`TxtLocPinY=TxtHeight*0.5`、`TxtAngle=0`、白色文字背景 `TextBkgnd`（`F="RGB(255,255,255)"`）、`TextBkgndTrans=0`，文本边距 0；再加 Character（8 pt）、Paragraph（居中）段，最后 `<Text>`。
+- 写法：在连线 Shape 中加 `TxtPinX/TxtPinY`（按 Width/Height 比例写公式，零跨度方向见上条，放最长线段中点）、`TxtWidth/TxtHeight`、`TxtLocPinX=TxtWidth*0.5`、`TxtLocPinY=TxtHeight*0.5`、`TxtAngle=0`、白色文字背景 `TextBkgnd`（`F="RGB(255,255,255)"`）、`TextBkgndTrans=0`，文本边距 0；再加 Character（8 pt）、Paragraph（居中）段，最后 `<Text>`。
 - 只在判定分支上用（7.1 之外的含义改为节点）。
 
 ## 8. 标题、编号与说明
@@ -223,8 +223,7 @@
 | `scripts/xml_backend/vsdxpkg.py` | vsdx 打包库：模板目录副本 + 新 page1.xml + 按图尺寸改页面大小 → vsdx | 被下面两个脚本调用 |
 | `scripts/xml_backend/build_docx.py` | 回写 docx：逐图替换嵌入 vsdx、预览 PNG、Word 对象尺寸与纵横比锁定、Content_Types | `python3 build_docx.py 原稿.docx figspecs.py work/templates 输出.docx --preview work/png` |
 | `scripts/xml_backend/build_vsdx.py` | 不经过 docx，直接生成独立 .vsdx + PNG 预览 | `python3 build_vsdx.py figspecs.py out/ [图号...]` |
-| `scripts/xml_backend/visio_finish.py` | **Windows + 本机 Visio 的验证与收尾（可选）**：缓存值核对、粘附核对、自动拖动测试；强制重算、导出 EMF（纵横比不符则保留 PNG）、Visio 另存 vsdx、回写 docx。单图失败不影响其余，有问题时退出码 1 | `python visio_finish.py 生成.docx 终稿.docx --report r.json`；只验证加 `--verify-only` |
-| `scripts/xml_backend/docxtext.py` | docx 正文编辑库：按段落字符位置替换（保留 run 格式）、插段落、改表格单元格、删段落，每处断言命中数 | 写一个修改脚本调用它，不手改 docx |
+| `scripts/xml_backend/visio_finish.py` | **Windows + 本机 Visio 的验证与收尾（可选）**：缓存值核对、粘附核对、连线几何首末点核对、自动拖动测试；强制重算、导出 EMF（纵横比不符则保留 PNG）、Visio 另存 vsdx、回写 docx。单图失败不影响其余，有问题时退出码 1 | `python visio_finish.py 生成.docx 终稿.docx --report r.json`；只验证加 `--verify-only` |
 | `assets/example_xml_flowchart.py` | 最小示例：带判定分支的流程图 | `python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/` |
 
 ### 11.4 分工

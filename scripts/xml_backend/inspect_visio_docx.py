@@ -32,7 +32,7 @@ def inspect_vsdx(blob):
     pw = float(re.search(r'N="PageWidth" V="([^"]+)"', pages).group(1)) * 25.4
     ph = float(re.search(r'N="PageHeight" V="([^"]+)"', pages).group(1)) * 25.4
     page_files = sorted(n for n in vz.namelist() if re.match(r'visio/pages/page\d+\.xml$', n))
-    stats = dict(pages=len(page_files), shapes=0, lines=0, slanted=0, unglued=0, value_err=0, sizes=set())
+    stats = dict(pages=len(page_files), shapes=0, lines=0, slanted=0, unglued=0, bare=0, value_err=0, sizes=set())
     for pf in page_files:
         raw = vz.read(pf).decode('utf8')
         stats['value_err'] += raw.count('#VALUE!') + raw.count('#REF!') + raw.count('#NAME?')
@@ -53,7 +53,12 @@ def inspect_vsdx(blob):
                 continue
             stats['lines'] += 1
             if glued.get(sh.get('ID'), set()) != {'BeginX', 'EndX'}:
-                stats['unglued'] += 1
+                # 无箭头又一端都没粘的线多是图例线、刻度线，单独计数，不算问题
+                arrows = any(cell(sh, k) is not None and cell(sh, k).get('V') not in (None, '0') for k in ('BeginArrow', 'EndArrow'))
+                if not arrows and sh.get('ID') not in glued:
+                    stats['bare'] += 1
+                else:
+                    stats['unglued'] += 1
             # slanted segment check on local geometry
             pts = []
             for row in sh.iter(f'{{{NS["v"]}}}Row'):
@@ -111,6 +116,8 @@ def main(path):
             flags.append(f'斜线 {s["slanted"]} 条')
         if s['unglued']:
             flags.append(f'未粘附连线 {s["unglued"]} 条')
+        if s['bare']:
+            line += f'  （另有无箭头未粘附线 {s["bare"]} 条，多为图例/刻度线）'
         eff = sorted(round(x * sx, 1) for x in s['sizes'])
         if eff and eff[0] < 7.5:
             flags.append(f'最小有效字号 {eff[0]}pt')

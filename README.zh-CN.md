@@ -109,6 +109,7 @@ python scripts/doc_consistency.py  # 文档-代码一致性
 ```
 pip install pillow
 python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/
+python -m unittest discover -s tests -v   # 不需要 Visio
 ```
 
 详见 [references/cross-platform.md](references/cross-platform.md)。

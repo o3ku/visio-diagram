@@ -18,13 +18,18 @@
 
 依赖：Windows、桌面版 Visio、pip install pywin32。docx 回写部分只用标准库。
 """
-import argparse, json, os, re, shutil, sys, tempfile, zipfile
+import argparse, math, json, os, re, shutil, sys, tempfile, zipfile
 
 TOL_MM = 0.05
 VS_NS = '{http://schemas.microsoft.com/office/visio/2012/main}'
 
 
 # ----------------------------------------------------------------- docx 部分（纯标准库，可跨平台测试）
+def _rb(path):
+    with open(path, 'rb') as fh:
+        return fh.read()
+
+
 def list_embeds(docx):
     """返回 [(嵌入路径 word/embeddings/x.vsdx, 预览路径 word/media/y.*), ...]，按正文顺序。"""
     with zipfile.ZipFile(docx) as z:
@@ -55,10 +60,10 @@ def rewrite_docx(src, dst, replace_vsdx, replace_preview):
         if old != new:
             del data[old]
             names[names.index(old)] = new
-        data[new] = open(emf, 'rb').read()
+        data[new] = _rb(emf)
     data[rels_p] = rels.encode('utf8')
     for p, f in replace_vsdx.items():
-        data[p] = open(f, 'rb').read()
+        data[p] = _rb(f)
     ct = data['[Content_Types].xml'].decode('utf8')
     if replace_preview and 'Extension="emf"' not in ct:
         ct = ct.replace('<Default Extension="rels"', '<Default Extension="emf" ContentType="image/x-emf"/><Default Extension="rels"', 1)
@@ -87,7 +92,7 @@ def xml_expect(vsdx):
 
 
 def emf_aspect(path):
-    data = open(path, 'rb').read(200)
+    data = _rb(path)[:200]
     l, t, r, b = (int.from_bytes(data[24 + 4 * k:28 + 4 * k], 'little', signed=True) for k in range(4))
     return (r - l) / float(b - t) if b > t else 0.0
 
@@ -95,6 +100,29 @@ def emf_aspect(path):
 # ----------------------------------------------------------------- Visio COM 部分（仅 Windows）
 def mm(cell):
     return cell.ResultIU * 25.4
+
+
+def geom_issues(s, sid, tag):
+    """连线几何（Geometry1）首点应在 Begin、末点应在 End；只看 Begin/End 单元格测不出线身脱节。"""
+    out = []
+    try:
+        n = s.RowCount(10) - 1                     # visSectionFirstComponent，第 0 行是组件行
+        if n < 2:
+            return out
+        bx, by = mm(s.CellsU('BeginX')), mm(s.CellsU('BeginY'))
+        ex, ey = mm(s.CellsU('EndX')), mm(s.CellsU('EndY'))
+        lx, ly = mm(s.CellsU('LocPinX')), mm(s.CellsU('LocPinY'))
+        px, py = mm(s.CellsU('PinX')), mm(s.CellsU('PinY'))
+        to_page = lambda x, y: (px - lx + x, py - ly + y)    # 1-D 连线 Angle=0
+        g0 = to_page(mm(s.CellsU('Geometry1.X1')), mm(s.CellsU('Geometry1.Y1')))
+        g1 = to_page(mm(s.CellsU(f'Geometry1.X{n}')), mm(s.CellsU(f'Geometry1.Y{n}')))
+        for (gx, gy), (cx, cy), which in ((g0, (bx, by), '首点≠Begin'), (g1, (ex, ey), '末点≠End')):
+            d = math.hypot(gx - cx, gy - cy)
+            if d > TOL_MM:
+                out.append(f'{tag}连线 {sid} 几何{which}（偏 {d:.2f} mm）')
+    except Exception as e:                          # 单元格不存在等
+        out.append(f'{tag}连线 {sid} 几何读取失败：{e}')
+    return out
 
 
 def check_drawing(app, path, exp, move_mm, verify_only, out_vsdx, out_emf):
@@ -113,6 +141,7 @@ def check_drawing(app, path, exp, move_mm, verify_only, out_vsdx, out_emf):
                 d = abs(mm(s.CellsU(k)) - e[k])
                 if d > TOL_MM:
                     rep['issues'].append(f'连线 {sid} {k} 缓存值偏差 {d:.2f} mm')
+            rep['issues'] += geom_issues(s, sid, '')
             n = s.Connects.Count
             if n != len(e['glued']):
                 rep['issues'].append(f'连线 {sid} 粘附端点 Visio={n} XML={len(e["glued"])}')
@@ -135,6 +164,8 @@ def check_drawing(app, path, exp, move_mm, verify_only, out_vsdx, out_emf):
                 x1, y1 = mm(shapes[sid].CellsU(end + 'X')), mm(shapes[sid].CellsU(end + 'Y'))
                 if abs(x1 - x0 - move_mm) > TOL_MM or abs(y1 - y0) > TOL_MM:
                     rep['issues'].append(f'拖动形状 {tid}：连线 {sid} 的 {end} 端未跟随（Δx={x1-x0:.2f} mm）')
+            for sid in {sid for sid, _ in ends}:
+                rep['issues'] += geom_issues(shapes[sid], sid, f'拖动形状 {tid} 后：')
             t.CellsU('PinX').FormulaU = pin
         if verify_only:
             return rep
@@ -186,7 +217,8 @@ def main():
             for i, (emb, prev) in enumerate(embeds, 1):
                 name = os.path.basename(emb)
                 src = os.path.join(work, name)
-                open(src, 'wb').write(z.read(emb))
+                with open(src, 'wb') as fh:
+                    fh.write(z.read(emb))
                 out_v = None if (a.verify_only or a.keep_xml_vsdx) else os.path.join(work, 'out_' + name)
                 out_e = None if (a.verify_only or a.no_emf) else os.path.join(work, name[:-5] + '.emf')
                 try:
@@ -212,7 +244,8 @@ def main():
             pass
         shutil.rmtree(work, ignore_errors=True)
     if a.report:
-        json.dump(report, open(a.report, 'w', encoding='utf8'), ensure_ascii=False, indent=1)
+        with open(a.report, 'w', encoding='utf8') as fh:
+            json.dump(report, fh, ensure_ascii=False, indent=1)
     sys.exit(1 if any(r['issues'] for r in report.values()) else 0)
 
 
