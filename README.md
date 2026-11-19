@@ -8,13 +8,13 @@ Each figure is exported as `.vsdx` (natively editable), `.emf` (vector for Word 
 
 ## Capabilities
 
-- Precise layout control: rectangles, text blocks, titled boxes, swimlanes, legends, horizontal / vertical arrows
-- Single-shape polyline connectors glued to connection points — endpoints follow when boxes move
+- Precise layout control: rectangles, ovals / interface circles, text blocks, titled boxes, swimlanes, legends, horizontal / vertical arrows
+- Single-shape connectors glued to connection points — straight, polyline, or smoothed curves (`smooth=`), endpoints follow when boxes move
 - Connector-carried labels positioned along the line (`label_at` / `label_gap` / `label_side`)
 - Text overflow self-check before export (font-metrics based line-wrap estimation)
 - Arrow alignment audit: flags endpoints that land off the edge midpoint; qualified offsets can be whitelisted
 - Automatic text merging into host shapes before save (≈47% fewer shapes, pixel-identical layout)
-- Word embedding: placeholder replacement (EMF), raw OOXML assembly, or in-place OLE conversion (double-click to edit in Visio)
+- Word embedding: placeholder replacement (EMF), raw OOXML assembly, in-place OLE conversion (double-click to edit in Visio), or replacing an existing OLE figure in place (`replace_ole.py`)
 - Document QA: static OOXML checks, Word layout measurement, regression suite, docs-vs-code consistency check
 
 ## Requirements
@@ -89,7 +89,7 @@ python scripts/audit_align.py --add 图表素材/图N8….vsdx    # whitelist re
 Run the regression suite after any engine change:
 
 ```bash
-python scripts/selftest.py          # 19 assertions
+python scripts/selftest.py          # 22 assertions
 python scripts/doc_consistency.py  # docs-vs-code consistency
 ```
 

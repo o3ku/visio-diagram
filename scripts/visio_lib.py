@@ -162,6 +162,37 @@ def _poly_near(pts, x, y):
         if best is None or d < best[0]:
             best = (d, i, (px, py), (dx / L2 ** 0.5, dy / L2 ** 0.5))
     return best
+def catmull_rom(pts, steps=12):
+    """过控制点的 Catmull-Rom 样条采样 → 点列（页坐标，含首尾）。
+
+    用途：Visio 的 `Page.DrawSpline` 在 COM 晚期绑定下调不通（参数不对即
+    `Invalid number of parameters`），而 `connect()` 的几何行只认折线。
+    故曲线统一走「密集折线」：每段采样 `steps` 个点，肉眼已无法分辨。
+    端点重复（粘连接点时常见）先去掉，避免零长段把切线拉歪。
+    """
+    pts = [tuple(p) for p in pts]
+    dedup = [pts[0]]
+    for p in pts[1:]:
+        if abs(p[0] - dedup[-1][0]) > 1e-9 or abs(p[1] - dedup[-1][1]) > 1e-9:
+            dedup.append(p)
+    if len(dedup) < 3 or steps < 2:
+        return dedup
+    p = [dedup[0]] + dedup + [dedup[-1]]          # 端点各复制一次（切线取零）
+    out = []
+    for i in range(len(p) - 3):
+        p0, p1, p2, p3 = p[i], p[i + 1], p[i + 2], p[i + 3]
+        for k in range(steps):
+            t = k / float(steps)
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t +
+                       (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+                       (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
+            y = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t +
+                       (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+                       (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+            out.append((x, y))
+    out.append(dedup[-1])
+    return out
 
 
 def _fix_emf_size(path, png=None):
@@ -295,7 +326,7 @@ class VDraw(object):
 
     def _skin(self, s, fill="white", line="black", lw="0.75 pt", lpat=1,
               rounding="0 mm", color="black", font=None, size=8.5,
-              align=1, valign=1):
+              align=1, valign=1, tmargin=0.6, margin=None):
         t = self.t
         fill = None if fill is None else t.c(fill, fill)
         line = t.c(line, line)
@@ -314,9 +345,10 @@ class VDraw(object):
         self._f(s, "Char.Size", "%g pt" % size)
         self._f(s, "Para.HorzAlign", str(align))     # 0左 1中 2右
         self._f(s, "VerticalAlign", str(valign))     # 0上 1中 2下
-        self._f(s, "LeftMargin", "%g mm" % MARGIN_MM)
-        self._f(s, "RightMargin", "%g mm" % MARGIN_MM)
-        self._f(s, "TopMargin", "0.6 mm")
+        lm = MARGIN_MM if margin is None else margin   # 框窄时调小，避免字数没超却折行
+        self._f(s, "LeftMargin", "%g mm" % lm)
+        self._f(s, "RightMargin", "%g mm" % lm)
+        self._f(s, "TopMargin", "%g mm" % tmargin)
         self._f(s, "BottomMargin", "0.6 mm")
 
     # ---------------------------------------------------------- 图元
@@ -327,15 +359,26 @@ class VDraw(object):
         self._skin(s, **kw)
         return s
 
+    def oval(self, x, ytop, w, h, **kw):
+        """椭圆 / 圆。kw 见 _skin()（`lpat=2` 画虚线外圈，`fill=None` 空心）。
+
+        用于「接口点 / 编号圆圈」这类标记：给它的 side_cps() 加连接点，
+        连线就能胶在圆边的四向上（比手工算切点稳）。
+        """
+        s = self.pg.DrawOval(0, 0, 1, 1)
+        self._place(s, x, ytop, w, h)
+        self._skin(s, **kw)
+        return s
+
     def text(self, x, ytop, w, h, content, size=8.5, color="black", align=1,
-             valign=1, font=None):
+             valign=1, font=None, margin=None):
         """无边框文本框。会登记到溢出自检清单。"""
         s = self._blank()
         self._place(s, x, ytop, w, h)
         self._skin(s, fill=None, lpat=0, color=color, font=font,
-                   size=size, align=align, valign=valign)
+                   size=size, align=align, valign=valign, margin=margin)
         s.Text = content
-        self._texts.append((content, size, w, h, font or self.font))
+        self._texts.append((content, size, w, h, font or self.font, margin))
         return s
 
     def line(self, x1, y1, x2, y2, arrow=4, lpat=1, color="black",
@@ -430,15 +473,16 @@ class VDraw(object):
             out[k] = self.add_cp(s, fx, fy, dirx=dx, diry=dy)
         return out
 
-    def connect(self, sa, ia, sb, ib, arrow=4, lpat=1, color="black",
+    def connect(self, sa, ia, sb=None, ib=None, arrow=4, lpat=1, color="black",
                 lw="0.75 pt", via=None, label=None, label_size=7,
                 label_color=None, label_align=1, label_pos=None,
-                label_at=None, label_gap=2.2, label_side=None):
+                label_at=None, label_gap=2.2, label_side=None, smooth=0):
         """单条动态连接线：两端胶到 sa[ia] / sb[ib] 指定的连接点。
 
         ia/ib 为 add_cp() 返回的行号；传 None 表示胶到形状中心（PinX/PinY）；
         传 `(x, y)` 页坐标元组表示该端**不胶水**、固定在给定点（用于指向图外 /
         汇入总线的箭头）。首/尾点可省略，自动按端点补齐。
+        终点的自由点可省掉形状与 ib：`connect(a, cp["right"], (x, y))`。
         via:  **路径点**（页坐标 mm，左上原点、Y 向下），如
                 [(x1,y1),(k1x,k1y),...,(x2,y2)]
               首/尾点可省略，自动按胶水端点补齐。
@@ -464,7 +508,13 @@ class VDraw(object):
                         （横线段→上方，竖线段→左侧）；'on' = 压在线上
             label_pos = (x,y) 绝对页坐标（**不随线移动**，改布局后会离老远，
                         仅确需精确定位时用；用后务必肉眼看一遍成品）。
+        smooth: 0（默认）= 按 via 折线走；>0 = 把 via 当**样条控制点**，按该值
+                每段采样点数（建议 8~16）生成平滑曲线。箭头方向自动取末端切线。
+                ★ 曲线仍是一条单形状、两端照样胶水，挪框跟随；代价是几何行点数变多
+                  （Visio 里没法再拖单个控制点，要改形状就改脚本里的 via）。
         """
+        if ib is None and isinstance(sb, tuple):   # connect(a, cp, (x, y)) 便捷写法
+            sb, ib = sa, sb
         def build():
             c = self.pg.DrawLine(0, 0, 1, 1)      # 1-D：自带 Begin/End 细胞可胶
             for cell, shp, idx in (("Begin", sa, ia), ("End", sb, ib)):
@@ -485,6 +535,15 @@ class VDraw(object):
             return c
 
         c = build()
+        if smooth and via:
+            # ★ 曲线：把 via 控制点过一遍 Catmull-Rom 采样成密集折线（页坐标）。
+            #   端点从刚胶好的 Begin/End 细胞回读，粘了哪里就跟哪里走。
+            bx = c.CellsU("BeginX").Result("mm")
+            by = self.H - c.CellsU("BeginY").Result("mm")
+            ex = c.CellsU("EndX").Result("mm")
+            ey = self.H - c.CellsU("EndY").Result("mm")
+            via = catmull_rom([(bx, by)] + [(p[0], p[1]) for p in via] + [(ex, ey)],
+                              steps=int(smooth))[1:-1]
         free_end = isinstance(ia, tuple) or isinstance(ib, tuple)
         if free_end:
             # ★ 有一端是**自由点**（不胶水）的连接线一律不加 ObjType：
@@ -1430,8 +1489,8 @@ class VDraw(object):
     def report(self, tol=0.0):
         """返回可能溢出的文字清单 [(文字, 字号, 框宽, 框高, 行数, 需高)]。"""
         bad = []
-        for txt, size, w, h, fname in self._texts:
-            avail = w - 2 * MARGIN_MM
+        for txt, size, w, h, fname, mg in self._texts:
+            avail = w - 2 * (MARGIN_MM if mg is None else mg)
             need, lines = text_extent_mm(txt, size, avail, fname)
             if need > h + tol:
                 bad.append((txt.replace("\n", " / ")[:36], size,

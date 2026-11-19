@@ -1,6 +1,6 @@
 ---
 name: visio-diagram
-version: "1.0.0-beta"
+version: "1.0.1-beta"
 description: 通过 COM 驱动本机 Visio 绘制矢量图，并嵌入 Word 文档。当用户要求画架构图 / 流程图 / 泳道图 / 模块关系图 / 数据流向图，或要求把图嵌入 docx，或提到 Visio、vsdx、EMF 矢量图、技术方案配图、总体设计方案插图时使用。适用于中文工程技术文档配图（总体设计方案、技术方案、试验大纲、研究报告），产出原生可编辑的 .vsdx 加矢量 .emf 与预览 .png，并自带文字溢出自检与 docx 版式核对。
 agent_created: true
 ---
@@ -102,6 +102,7 @@ def main():
 | 方法 | 用途 |
 |---|---|
 | `rect(x, y, w, h, **style)` | 矩形 |
+| `oval(x, y, w, h, **style)` | 椭圆 / 圆（接口编号圈用：`fill="white"` 实心圈 + `fill=None, lpat=2` 虚线外圈） |
 | `text(x, y, w, h, s, size=, color=, align=)` | 文本框 |
 | `line(x1, y1, x2, y2, arrow=4, lpat=1)` | 直线（`arrow=4` 实心箭头，`0` 无） |
 | `poly([(x,y),...], arrow=4, lpat=4)` | 折线，仅末段带箭头 |
@@ -112,6 +113,8 @@ def main():
 | `legend(x, y, w, [(文字, lpat), ...])` | 图例行（条目在总宽 `w` 内**均布**；`w` 必须给足，太小或内容越出画布 → 导出按内容裁剪，右侧凭空多出一片空白，见 §22） |
 | `add_cp(形状, fx, fy)` / `side_cps(形状, "top bottom")` | 给形状加连接点（**fy 自上边起算**），返回行号 |
 | `connect(形状A, cpA, 形状B, cpB, via=[...])` | **单条折线连接线**，两端胶到连接点、按 via 折点走；挪框时端点跟随 |
+| `connect(..., via=[...], smooth=10)` | **曲线连接线**：via 当样条控制点，每段采样 10 点（8~16 合适）。箭头方向取末端切线；`connect(a, cp, (x, y))` 可省掉终点形状写自由端 |
+| `rect/text(..., margin=0.4)` | 框内左右内边距（默认 0.8 mm）。框宽只够放满一行时收紧它，别再缩字号 |
 | `connect(..., label=, label_at=, label_gap=, label_side=)` | 连接线**自带文本**。★ 标签一律用**沿线相对定位**（`label_at` 默认取最长段中点、`label_gap` 垂距、`label_side` 偏哪侧），**不要**手写 `label_pos` 绝对坐标（不随线移动，改布局就漂，见 §23） |
 
 样式参数用**主题字段名**而不是写死颜色：`fill="muted_fill"`、`color="accent"`、`line="mgray"`。
@@ -226,6 +229,16 @@ python scripts/word_insert.py 方案.docx --placeholder "{{FIG:N2}}" --image 图
 
 默认宽度 = 正文栏宽 − 5 mm，高度按 EMF 宽高比自动算。
 
+**路线 D** —— 文档里**已经有**一张 Visio OLE 图，要原地换掉（返修 / 甲方文档改图）：
+
+```bash
+python scripts/replace_ole.py 方案.docx 图表素材/图N2.emf 图表素材/图N2.vsdx
+```
+
+同时换 `word/embeddings/*.vsdx` 与 `word/media/*.emf`（Word 平时画的是缓存的 EMF，
+只换一处就会出现「显示的图 ≠ 双击进去的图」），并按 EMF 的 `rclFrame` 宽高比重写
+显示框（缺省宽 = 正文栏宽 − 0.5pt）。细节见 `pitfalls.md` §31。
+
 **路线 B** —— 从零合成 docx 时手工拼 OOXML，见 `references/docx-embed.md`（含三个必踩的坑）。
 
 **路线 C** —— 甲方要求「双击进 Visio 改图」时，把已插好的图**原地换成 OLE 对象**：
@@ -273,7 +286,7 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
 4. **颜色走主题字段名** —— 不要写死 `"RGB(31,78,121)"`，便于整体换主题。
 5. **算栏宽要含装订线** —— 忽略 `w:gutter` 会让表格/图溢出页面。
 6. **连接线用 `connect()` 单条折线 + 胶连接点** —— 不要用 `poly()` 多条线段拼（挪框时不跟随、Visio 里无法整体编辑）；也不要用 `Page.Layout()` 重排（会搬动已排好的方块）。
-7. **改完库先跑自测** —— `python scripts/selftest.py`（19 项回归断言，含离线 EMF 头校验）；文档改动跑 `python scripts/doc_consistency.py`（防结论漂移）。**图例总宽 `w` 要给足**，否则整行越出画布（§22）。
+7. **改完库先跑自测** —— `python scripts/selftest.py`（22 项回归断言，含离线 EMF 头校验）；文档改动跑 `python scripts/doc_consistency.py`（防结论漂移）。**图例总宽 `w` 要给足**，否则整行越出画布（§22）。
 
 ---
 
@@ -287,7 +300,12 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
    边界情形可能误吞或漏并。**要精确控制就用显式 `label=`**（写进连接线自带文本），别依赖启发式。
 3. **依赖本机 Visio + pywin32，不是纯离线可移植** —— PowerShell 无法实例化 COM（沙箱策略），
    必须走 Python；换机器需装 Visio 与 `pywin32` / `pillow`，并确保中文字体（默认「微软雅黑」）。
-4. **COM 单实例，进程需自行收尾** —— 忘 `d.close()` 会残留 `VISIO.EXE`，累积后 COM 调用超时；
+4. **箭头只有「中号」可选** —— `DrawLine`/`DrawPolyline` 生成的形状没有 `ArrowSize`
+   单元格（`pitfalls.md` §30），箭头不随线宽缩放。位置挤的地方（相邻 3 mm 内的接口圈）
+   靠「留够长度 + 切线方向接近 + 96 dpi 目视」解决，不要指望改 `LineWeight` 缩箭头。
+5. **曲线是密集折线近似** —— `connect(smooth=)` 用 Catmull-Rom 采样（`pitfalls.md` §30），
+   Visio 里没有可拖的控制点；`Page.DrawSpline` 在 COM 下根本调不通，别试。
+6. **COM 单实例，进程需自行收尾** —— 忘 `d.close()` 会残留 `VISIO.EXE`，累积后 COM 调用超时；
    残留进程还会让 Word 嵌 OLE 时**复用旧文档**（`pitfalls.md` §14）。
 
 ---
@@ -302,9 +320,10 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
 | `theme.py` | 三套配色主题 + 字体文件映射 |
 | `docx_embed.py` | `emf_size_mm()` 读 EMF 图幅 · `content_column_mm()` 算正文栏宽（**默认取末节、支持多栏折算**）· `ensure_content_type()` 补声明 |
 | `word_insert.py` | 路线 A：Word COM 按占位符插图（含命令行） |
+| `replace_ole.py` | 路线 D：原地替换文档里已有的 Visio OLE 图（vsdx + 缓存 EMF + 显示框一起换） |
 | `audit_align.py` | 箭头对齐审计：查出「箭头连到框但落点偏离边中点」的漂移；**已定性刻意偏移可用 `--add` 登记白名单**（`audit_whitelist.json`，坐标 ±3mm 匹配、失效提示） |
 | `docx_audit.py` | 交付前自查：静态 OOXML 检查 + Word 版式实测 |
-| `selftest.py` | **库自测**：画覆盖 A–L 12 类回归项的测试图 → 断言 ObjType / 几何点数 / 连接线标签 / 文字并入 / 图例不越界 / EMF 头重写（**改完库先跑它**，`python scripts/selftest.py`） |
+| `selftest.py` | **库自测**：画覆盖 A–O 15 类回归项的测试图 → 断言 ObjType / 几何点数 / 连接线标签 / 文字并入 / 图例不越界 / EMF 头重写（**改完库先跑它**，`python scripts/selftest.py`） |
 | `doc_consistency.py` | **文档-代码一致性**：废止表述黑名单 + 关键结论必须在位 + 成对约束，防「代码改了、文档还写旧结论」的漂移 |
 
 ### references/
@@ -354,4 +373,8 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
 | **某条连线标签整条文字消失** | 放宽 `_merge_line_labels` 启发式后多个文本框并入同一线、互相覆盖 | **`pitfalls.md` §20.4** |
 | **连线标签离连接线老远**（改布局后尤其明显） | 写了 `label_pos` 绝对坐标（不随线移动），或标签是独立文本框、偏移被原样并进连接线。改用 `label_at/label_gap/label_side` 沿线相对定位；并入路径已自动贴线归一 | **`pitfalls.md` §23** |
 | **图上右侧一大片空白 / 图例条目间距悬殊** | `legend()` 的 `w` 给得太小（或图例/长文本越出画布），导出按内容裁剪把越界部分也裁进来 | **`pitfalls.md` §22** |
+| **换完图页面还是旧的 / 双击进去才是新的** | 只换了 vsdx，没换 `word/media/*.emf` 缓存预览 | `replace_ole.py` / `pitfalls.md` §31 |
+| **换完图变扁** | 没按新 EMF 的 `rclFrame` 宽高比重写 `v:shape` 显示框 | `pitfalls.md` §31.2 |
+| `DrawSpline` 报 `Invalid number of parameters` | COM 下该 API 调不通 | `pitfalls.md` §30.1（用 `smooth=`） |
+| 箭头太大 / 挤成一团 | 画出的形状没有 `ArrowSize` 单元格，固定中号 | `pitfalls.md` §30.2 |
 | `/skill名` 命令载入的是**旧版**内容 / base directory 指向 `*.bak_*` | skills 目录里混入了 skill 的**备份副本**（会被扫描器当候选）。把备份移出 skills/（如 `~/.workbuddy-ai/skill-backups/`），只留正本 | 本条 |

@@ -8,13 +8,13 @@
 
 ## 能力范围
 
-- 精确版式控制：矩形、文本块、标题方块、泳道、图例、水平 / 垂直箭头
-- 单条折线连接线，两端胶到连接点 —— 挪框时端点跟随
+- 精确版式控制：矩形、椭圆 / 接口编号圈、文本块、标题方块、泳道、图例、水平 / 垂直箭头
+- 单条连接线胶到连接点：直线 / 折线 / 平滑曲线（`smooth=`）—— 挪框时端点跟随
 - 连接线自带标签，沿线相对定位（`label_at` / `label_gap` / `label_side`）
 - 出图前文字溢出自检（基于字体度量的折行估算）
 - 箭头对齐审计：报出偏离边中点的端点；已定性的刻意偏移可登记白名单
 - 保存前自动把文本框并入宿主形状（形状数省约 47%，版式逐像素不变）
-- 嵌入 Word：占位符替换（EMF）/ 手拼 OOXML / 原地换 OLE（双击进 Visio 改图）
+- 嵌入 Word：占位符替换（EMF）/ 手拼 OOXML / 原地换 OLE（双击进 Visio 改图）/ 替换文档里已有的 OLE 图（`replace_ole.py`）
 - 文档自检：静态 OOXML 检查、Word 版式实测、回归测试、文档-代码一致性检查
 
 ## 环境要求
@@ -86,10 +86,16 @@ python scripts/audit_align.py 图表素材/*.vsdx
 python scripts/audit_align.py --add 图表素材/图N8….vsdx    # 登记本次报出的偏移
 ```
 
+替换文档里**已有**的 Visio OLE 图（返修场景，vsdx + 缓存 EMF + 显示框一起换）：
+
+```bash
+python scripts/replace_ole.py 方案.docx 图表素材/图N2.emf 图表素材/图N2.vsdx
+```
+
 改完引擎先跑回归：
 
 ```bash
-python scripts/selftest.py          # 19 项断言
+python scripts/selftest.py          # 22 项断言
 python scripts/doc_consistency.py  # 文档-代码一致性
 ```
 

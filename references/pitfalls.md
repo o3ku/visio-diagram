@@ -1228,3 +1228,86 @@ print(rb[3] - rb[1], Image.open(png).size[1])     # 333 342
 Word / WPS 重存过的 docx 里，`word/media/imageN.emf` 的编号**与正文出现顺序无关**
 （后插入的图 11-7 是 `image17.emf`，却排在第 10 位）。按序号替换会张冠李戴 ——
 必须按 `document.xml` 里 `w:object` 的顺序取 `rId` → 媒体文件，再用**图题**匹配素材。
+
+---
+
+## 30. 曲线连接线与箭头大小（2026-11-19 实证）
+
+### 30.1 `Page.DrawSpline` 在 COM 下**调不通**
+
+早/晚绑定都试过：
+
+```python
+page.DrawSpline((0.5, 0.5, 1.0, 1.2, 1.5, 1.4, 2.0, 1.0), 0)
+# pywintypes.com_error: (-2147352562, 'Invalid number of parameters.')
+page.DrawSpline(VARIANT(VT_ARRAY|VT_R8, vals), 0)
+# TypeError: Objects for SAFEARRAYS must be sequences (of sequences), or a buffer object.
+```
+
+参数怎么给都不对（`xyArray` 需要 Visio 私有 SAFEARRAY 布局）。**不要在这上面耗**：
+曲线一律用 `connect(..., via=[控制点], smooth=N)` —— 本库用 Catmull-Rom 过控制点
+采样成密集折线（`catmull_rom()`），每段 N 点，几何行仍是普通 `LineTo`。
+
+代价与注意：
+
+- 曲线没有可拖的控制点（Visio 里只能整体拖），改形状就改脚本的 `via`；
+- 控制点**别重复**（粘连接点时端点会与首/尾点重合）→ `catmull_rom()` 内部先去重，
+  否则零长段把切线拉歪，末端会出现回勾、箭头方向也跟着反；
+- 首段方向必须朝连接点的朝外法线，否则 `_check_end_dirs()` 照样报警（曲线不豁免）。
+
+### 30.2 画出来的 1-D 形状**没有 `ArrowSize` 单元格**
+
+`DrawLine` / `DrawPolyline` 生成的形状，Line 段里只有 `BeginArrow` / `EndArrow`，
+**没有 `ArrowSize`**（`CellsU("ArrowSize")` 报 `Unexpected end of file`；
+`CellsSRC(1,0,6)` 取到的是几何段）。后果：
+
+- 箭头永远是 Visio 的「中号」，**不随 `LineWeight` 缩放**（实测 0.5pt 与 0.75pt 的箭头一样大）；
+- 想缩小箭头只有三条路：① 给箭头留够长度（首选，别把 3 mm 缝隙塞满一个箭头）；
+  ② 让箭头落在圆/框的**切线方向**上（水平接近比斜着接近干净）；③ 手画一个小三角
+  （`poly` 三点）当箭头，`EndArrow=0`。
+
+★ 判断「箭头是不是太大」要在 **96 dpi 下看**（Word 里 100% 缩放的实际观感）。
+300 dpi 放大 3 倍看小箭头，任何 0.75pt 线的箭头都会显得糊成一团，容易白改半天。
+
+---
+
+## 31. 原地替换文档里**已有**的 OLE 图（返修场景，2026-11-19 实证）
+
+甲方 / 上一版交付的 docx，图常常是 `<w:object>` 包着的 Visio OLE 对象。要换图时：
+
+### 31.1 必须换**两处**，少一处就「显示的图和双击进去的图不一致」
+
+| 槽位 | 作用 |
+|---|---|
+| `word/embeddings/*.vsdx`（或 `Microsoft_Visio_Drawing.vsdx`） | 双击激活时打开的源对象 |
+| `word/media/*.emf` | **Word 平时画的就是这个缓存预览**，不开 Visio |
+
+只换 vsdx → 页面上还是旧图；只换 EMF → 双击进去还是旧图。
+
+### 31.2 显示框宽高要按新 EMF 重写
+
+`<w:object>` 里 `<v:shape style="width:439.5pt;height:227.5pt">` 是显示框。图重画后
+宽高比变了却不改它，Word 会**拉伸**（常见症状：图被压扁、字变瘦）。改法：
+
+```python
+STYLE_RE = re.compile(r'(style="width:)([\d.]+)(pt;height:)([\d.]+)(pt)')
+# 只对 <w:object>…</w:object> 内做一次替换，别动其它图片
+```
+
+高度 = 宽度 ÷ EMF 宽高比，比例从 EMF 头 `rclFrame`（0.01 mm）取 —— **别用** VML
+`style` 里旧的值，也别用 `w:dxaOrig`（那是原对象尺寸，与显示框无关）。
+
+### 31.3 显示框宽度别超过正文栏宽
+
+本机实测：`w:pgMar` 左右各 1797 twips → 栏宽 8313 twips = **415.7pt**。老图常是
+439.5pt（溢出页边 8mm），换图时一并收到栏宽内，顺便把「图比表格宽」的版式问题修掉。
+
+### 31.4 现成脚本
+
+```bash
+python scripts/replace_ole.py 方案.docx 图N2.emf 图N2.vsdx      # 缺省显示框 = 栏宽 − 0.5pt
+python scripts/replace_ole.py 方案.docx … --width-pt 400        # 需要更窄时显式给
+```
+
+脚本只处理「一图一对象」；多图时按 §29.5，**按 `document.xml` 里 `w:object` 的 rId
+对到媒体文件再用图题匹配**，不要按 `imageN` 序号猜。

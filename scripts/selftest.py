@@ -18,6 +18,9 @@
   J 连线**出线方向**自检    → 目标在右却从左边出线，必须报出     （§24）
   K 合法**绕行**不误报      → 先向左绕再回头接右边，不报          （§24）
   L EMF 头重写（离线）      → 三套尺寸按 96DPI 对齐、二次运行幂等   （§29）
+  M **椭圆**（接口编号圈）  → 圆 + 虚线外圈、编号文字在圆里         （§30）
+  N **平滑曲线**（smooth=） → 控制点 3 个 → 几何被采样成密集折线   （§30）
+  O 框内**内边距**（margin=）→ 窄框收紧内边距后不再误报折行溢出     （§3）
 
 用法：
     python scripts/selftest.py            # 在临时目录里跑，跑完自动清理
@@ -194,6 +197,18 @@ def main():
         idHost = host.ID
         d.text(64, 44, 32, 12, "宿主文字")
 
+        # M 椭圆（接口圆圈：虚线外圈 + 实线圆 + 编号）
+        d.oval(130, 40, 12, 12, fill=None, lpat=2)
+        dot = d.oval(132, 42, 8, 8, fill="white")
+        dot.Text = "1"
+        idDot = dot.ID
+        # N 平滑曲线：via 当控制点，几何点数应远多于控制点数
+        idN = d.connect(a, cpa["b"], b, cpb["b"],
+                        via=[(26, 40), (60, 74), (120, 56)], smooth=8).ID
+        # O 窄框 + margin=0.2：按默认内边距会折行/溢出，收紧后应放得下
+        d.text(6, 76, 12.0, 8, "用户接口", size=8, margin=0.2)
+        bad_tight = d.report()
+
         n_drawn = d.pg.Shapes.Count
         d.save(vsdx)
         safe_close()          # 存完即关，后续只读 vsdx 解析，无需 Visio
@@ -220,6 +235,16 @@ def main():
               "绘制 %d → 存盘 %d" % (n_drawn, len(sh)))
         check("E 宿主获得文字", "宿主文字" in g(idHost).get("text", ""),
               "text=%r" % g(idHost).get("text"))
+
+        check("M 椭圆可画（圆+编号）", g(idDot).get("text") == "1"
+              and abs(g(idDot).get("cells", {}).get("Width", 0) - 8) < 0.2,
+              "text=%r width=%s" % (g(idDot).get("text"),
+                                    round(g(idDot).get("cells", {}).get("Width", 0), 2)))
+        check("N 平滑曲线被采样成密集折线", g(idN).get("geo", 0) > 6,
+              "geo=%s（控制点 3 个）" % g(idN).get("geo"))
+        check("O margin=0.2 不误报溢出",
+              not any("用户接口" in b[0] for b in bad_tight),
+              "检出 %d 处" % len([b for b in bad_tight if "用户接口" in b[0]]))
 
         # H 标签贴线（显式 label=）：文字中心必须落在「线上 ± label_gap」，
         #   而不是折线包围盒中心（肘形线那个点常常根本不在线上，§23）
