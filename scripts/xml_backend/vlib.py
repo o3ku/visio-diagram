@@ -3,26 +3,35 @@ import math
 import os
 from PIL import Image, ImageDraw, ImageFont
 from xml.sax.saxutils import escape
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from font_support import DEFAULT_CJK_FONT as _DEFAULT_CJK, DEFAULT_LATIN_FONT as _DEFAULT_LATIN
 
 def _find_fonts():
-    """PNG 预览用的中文字体（Visio XML 里始终写微软雅黑）。返回 ((常规路径, ttc序号), (粗体路径, ttc序号))。
-    查找顺序：环境变量 VISIO_KIT_FONT_R / VISIO_KIT_FONT_B（.ttc 序号用 VISIO_KIT_FONT_INDEX）→ Windows 微软雅黑
-    → Noto Sans CJK（.ttc 第 0 个是日文字形，简体中文取第 2 个）→ 苹方。"""
-    env_r, env_b = os.environ.get('VISIO_KIT_FONT_R'), os.environ.get('VISIO_KIT_FONT_B')
-    if env_r:
-        idx = int(os.environ.get('VISIO_KIT_FONT_INDEX', '0'))
-        return (env_r, idx), (env_b or env_r, idx)
-    cands = [
-        ('C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/msyhbd.ttc', 0),
-        ('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc', 2),
-        ('/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc', '/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc', 2),
-        ('/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc', '/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc', 2),
-        ('/System/Library/Fonts/PingFang.ttc', '/System/Library/Fonts/PingFang.ttc', 0),
-    ]
-    for r, b, idx in cands:
-        if os.path.exists(r):
-            return (r, idx), (b if os.path.exists(b) else r, idx)
-    raise RuntimeError('找不到中文字体：请设置环境变量 VISIO_KIT_FONT_R（及可选 VISIO_KIT_FONT_B）指向 .ttf/.otf/.ttc')
+    """PNG 预览用的中文字体（Visio XML 里写 ASIAN 指定的字体族）。
+    优先用 font_support 按操作系统选取的默认字体（可通过 VISIO_FONT_CJK(_BOLD)_FILE
+    覆盖）；保留 VISIO_KIT_FONT_R/B 旧变量兼容。返回 ((常规路径, ttc序号), (粗体路径, ttc序号))。"""
+    from theme import font_file
+
+    def _pick(bold):
+        path = font_file(os.environ.get('VISIO_FONT_CJK', _DEFAULT_CJK), bold=bold)
+        if path:
+            return path
+        env_r, env_b = os.environ.get('VISIO_KIT_FONT_R'), os.environ.get('VISIO_KIT_FONT_B')
+        if bold and env_b:
+            return env_b
+        if env_r:
+            return env_r
+        raise RuntimeError(
+            '找不到中文字体：请安装系统 CJK 字体，或设置 VISIO_FONT_CJK_FILE / '
+            'VISIO_FONT_CJK_BOLD_FILE（旧变量 VISIO_KIT_FONT_R / VISIO_KIT_FONT_B 仍支持）')
+
+    # Noto Sans CJK .ttc 第 0 个是日文字形，简体中文取第 2 个
+    chosen = os.environ.get('VISIO_FONT_CJK', _DEFAULT_CJK)
+    idx = 2 if 'NotoSansCJK' in chosen.replace(' ', '') else 0
+    idx = int(os.environ.get('VISIO_KIT_FONT_INDEX', str(idx)))
+    return (_pick(False), idx), (_pick(True), idx)
 
 
 FONT_R = FONT_B = None
@@ -40,8 +49,8 @@ def _font(bold, px):
     return ImageFont.truetype(path, px, index=idx)
 
 
-LATIN = 'Microsoft YaHei'
-ASIAN = '微软雅黑'
+LATIN = _DEFAULT_LATIN
+ASIAN = os.environ.get('VISIO_FONT_CJK', _DEFAULT_CJK)
 
 # palette
 NAVY = '#1F3864'

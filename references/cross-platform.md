@@ -46,7 +46,7 @@ python scripts/xml_backend/visio_finish.py out.docx final.docx
 - `tests/test_xml_backend.py`：冒烟与回归测试（粘附、零宽/零高连线几何公式、标题带不参与粘附、对齐、错误提示、合成 docx 往返、模板目录清理）。
 
 ## 字体
-PNG 预览需要中文字体，`vlib.py` 依次查找微软雅黑、Noto Sans CJK（自动取 .ttc 里的简体中文字形）、苹方；都没有时设 `VISIO_KIT_FONT_R`（及可选的 `VISIO_KIT_FONT_B`，.ttc 序号用 `VISIO_KIT_FONT_INDEX`）。Visio XML 里字体始终写微软雅黑。
+默认字体按操作系统选取（`scripts/font_support.py`，COM 与 XML 两条路线共用）：Windows＝Arial + Microsoft YaHei；macOS＝Helvetica Neue + PingFang SC；Linux＝fontconfig 检测的系统字体（如 Noto Sans CJK）。PNG 预览用同一字体；Visio XML 里 `Font`/`AsianFont` 分别写 Latin/CJK 字体族。可用环境变量覆盖：`VISIO_FONT_LATIN` / `VISIO_FONT_CJK`（字体族）与 `VISIO_FONT_{LATIN,CJK}{,_BOLD}_FILE`（预览度量字体文件）；旧变量 `VISIO_KIT_FONT_R/B`（.ttc 序号 `VISIO_KIT_FONT_INDEX`）仍兼容。找不到字体时报错，不静默换用无关字体。
 
 ## 已知限制
 - 只做整页重绘，不在原图上局部修改，也不处理主控形状、主题继承和模具。

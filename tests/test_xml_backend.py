@@ -237,7 +237,8 @@ class TestPipeline(unittest.TestCase):
         self.assertIn(f'width:{150/25.4*72:.2f}pt;height:{70/25.4*72:.2f}pt', doc)
         self.assertIn('aspectratio="t"', doc)
         self.assertIn('参数校验', page)
-        r = subprocess.run([sys.executable, os.path.join(XB, 'inspect_visio_docx.py'), out], capture_output=True, text=True, check=True)
+        env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        r = subprocess.run([sys.executable, os.path.join(XB, 'inspect_visio_docx.py'), out], capture_output=True, text=True, encoding='utf-8', env=env, check=True)
         self.assertIn('问题：无', r.stdout)
 
     def test_bad_suffix_message(self):

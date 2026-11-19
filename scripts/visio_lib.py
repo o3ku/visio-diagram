@@ -85,7 +85,7 @@ def check_env(verbose=True):
     return (not problems), problems
 
 
-def _font(size_pt, font_name="微软雅黑"):
+def _font(size_pt, font_name=_theme.DEFAULT_CJK_FONT):
     key = (round(size_pt, 2), font_name)
     if key not in _FONTS:
         try:
@@ -103,7 +103,7 @@ def _font(size_pt, font_name="微软雅黑"):
     return _FONTS[key]
 
 
-def _font_scale(size_pt, font_name="微软雅黑"):
+def _font_scale(size_pt, font_name=_theme.DEFAULT_CJK_FONT):
     """返回 (font, scale)。★ PIL 的 truetype 会把字号**取整**（11.33→11px），
     使量出的字宽系统性偏小 ~3% → 折行行数少算（实测 图N6「读时刻（时间戳计数寄存器）」
     13 字在 38.4mm 宽里 Visio 折 2 行、PIL 却算 1 行）→ 合并时块高算小、文字下移 1.8mm。
@@ -112,7 +112,7 @@ def _font_scale(size_pt, font_name="微软雅黑"):
     return _font(size_pt, font_name), (size_pt * 96.0 / 72.0) / float(px)
 
 
-def text_extent_mm(text, size_pt, width_mm, font_name="微软雅黑"):
+def text_extent_mm(text, size_pt, width_mm, font_name=_theme.DEFAULT_CJK_FONT):
     """按字体真实度量估算折行后的文字高度（mm）。
 
     返回 (需要的总高 mm, 折行行数)。
@@ -340,7 +340,8 @@ class VDraw(object):
             self._f(s, "LineWeight", lw)
         self._f(s, "Rounding", rounding)
         self._f(s, "Shadows", "0")
-        self._f(s, "Char.Font", '"%s"' % (font or self.font))
+        self._f(s, "Char.Font", '"%s"' % (font or self.t.latin_font))
+        self._f(s, "Char.AsianFont", '"%s"' % (font or self.font))
         self._f(s, "Char.Color", color)
         self._f(s, "Char.Size", "%g pt" % size)
         self._f(s, "Para.HorzAlign", str(align))     # 0左 1中 2右
@@ -844,7 +845,8 @@ class VDraw(object):
           只设 TxtPin/TxtLocPin/TxtAngle 即可正确水平落位，与 `_merge_line_labels` 一致。
         """
         c.Text = text
-        self._f(c, "Char.Font", '"%s"' % self.font)
+        self._f(c, "Char.Font", '"%s"' % self.t.latin_font)
+        self._f(c, "Char.AsianFont", '"%s"' % self.font)
         self._f(c, "Char.Size", "%g pt" % size)
         self._f(c, "Char.Color", self.t.c(color, color))
         self._f(c, "Para.HorzAlign", str(int(align)))
@@ -1062,11 +1064,17 @@ class VDraw(object):
                 n_skip += len(items)
                 continue
             aligns = {_i(it[0], "Para.HorzAlign", 1) for it in items}
-            fonts = {it[0].CellsU("Char.Font").FormulaU for it in items}
-            if len(aligns) > 1 or len(fonts) > 1:
+            latin_fonts = {it[0].CellsU("Char.Font").FormulaU for it in items}
+            asian_fonts = {it[0].CellsU("Char.AsianFont").FormulaU for it in items}
+            if len(aligns) > 1 or len(latin_fonts) > 1 or len(asian_fonts) > 1:
                 n_skip += len(items)
                 continue
-            font = fonts.pop().strip('"')
+            latin_font = latin_fonts.pop().strip('"') or self.t.latin_font
+            font = asian_fonts.pop().strip('"') or self.font
+            if latin_font.isdigit():
+                latin_font = self.t.latin_font
+            if font.isdigit():
+                font = self.font
 
             paras = []
             for s, b, t in items:
@@ -1102,7 +1110,8 @@ class VDraw(object):
             #   读回各行字号定位「段 → Character 段行号」，再用 CellsSRC 精修：
             #   Character 段（section 3）单元格 = 0 Font / 1 Color / 7 Size。
             host.Text = "\n".join(p["t"] for p in paras)
-            self._f(host, "Char.Font", '"%s"' % font)
+            self._f(host, "Char.Font", '"%s"' % latin_font)
+            self._f(host, "Char.AsianFont", '"%s"' % font)
             self._f(host, "Char.Size", "%g pt" % paras[0]["size"])
             self._f(host, "Char.Color", paras[0]["color"])
             self._f(host, "Para.HorzAlign", str(aligns.pop()))
@@ -1146,7 +1155,7 @@ class VDraw(object):
                 r = rowmap.get(sent[i])
                 if r is None:
                     continue
-                for cell, val in ((0, '"%s"' % font), (1, p["color"]),
+                for cell, val in ((0, '"%s"' % latin_font), (1, p["color"]),
                                   (7, "%g pt" % p["size"])):
                     try:
                         host.CellsSRC(3, r, cell).FormulaU = val

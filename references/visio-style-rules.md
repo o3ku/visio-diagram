@@ -210,7 +210,7 @@
 ### 11.2 运行环境与库
 - Python 3 标准库：`zipfile`（docx/vsdx 解包打包）、`re`（定位 `<w:object>`、改尺寸属性）、`xml.etree.ElementTree` / `lxml`（解析与校验 XML）、`xml.sax.saxutils.escape`（转义形状文字）、`math`（连线角度与局部坐标）。
 - Pillow（PIL）：渲染预览 PNG（`ImageDraw.rounded_rectangle`、`text(anchor='mm')`、手工虚线）。
-- 字体：Noto Sans SC Regular / Bold（`vlib.py` 自动查找微软雅黑 / 苹方 / Noto CJK，或用环境变量 `VISIO_KIT_FONT_R`、`VISIO_KIT_FONT_B` 指定），仅作 PNG 预览时微软雅黑的渲染替身；Visio XML 里仍写微软雅黑。
+- 字体：按操作系统取默认（`scripts/font_support.py`：Windows Arial + Microsoft YaHei、macOS Helvetica Neue + 苹方、Linux fontconfig 检测），PNG 预览与 Visio XML 用同一字体族；可用 `VISIO_FONT_LATIN` / `VISIO_FONT_CJK` 与 `VISIO_FONT_*_FILE` 覆盖（旧变量 `VISIO_KIT_FONT_R/B` 兼容）。找不到字体时报错，不静默替换。
 - 没有 Visio / LibreOffice 也能完成：预览由脚本自己画，不依赖 Office 渲染 vsdx。
 
 ### 11.3 XML 后端脚本（scripts/xml_backend/）
@@ -254,7 +254,7 @@ xml = f.visio_xml()                                 # 写入 vsdx 的 visio/page
 - 手工折线的端点坐标必须正好落在形状边框上；分支线从源形状边上引出，不从另一条线中间引出。
 - `legend()`、`text(..., 'note')` 仍保留在库里，但按第 6、8 节默认不用。
 - 辅助函数思路：`row(n, x0, x1, gap)` 计算等宽横排；`chain(f, ids)` 依次左右相连。
-- 字体自动查找；找不到时设环境变量 `VISIO_KIT_FONT_R` / `VISIO_KIT_FONT_B`，无需改代码。
+- 字体按操作系统取默认；覆盖用 `VISIO_FONT_LATIN` / `VISIO_FONT_CJK`（或旧变量 `VISIO_KIT_FONT_R/B`），无需改代码。
 
 ## 13. 交付前自检清单
 

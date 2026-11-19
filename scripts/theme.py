@@ -7,52 +7,65 @@
 """
 
 import os
+import sys
 
-# 常见中文字体 -> 字体文件（用于文字溢出的字体度量自检）
-FONT_FILES = {
-    "微软雅黑": r"C:\Windows\Fonts\msyh.ttc",
-    "Microsoft YaHei": r"C:\Windows\Fonts\msyh.ttc",
-    "宋体": r"C:\Windows\Fonts\simsun.ttc",
-    "SimSun": r"C:\Windows\Fonts\simsun.ttc",
-    "黑体": r"C:\Windows\Fonts\simhei.ttf",
-    "SimHei": r"C:\Windows\Fonts\simhei.ttf",
-    "等线": r"C:\Windows\Fonts\Deng.ttf",
-    "Arial": r"C:\Windows\Fonts\arial.ttf",
+from font_support import DEFAULT_CJK_FONT, DEFAULT_LATIN_FONT, font_file as _fs_font_file
+
+# 常见中文字体 → 字体文件（theme.FONT_FILES 的超集，供 XML/COM 两条路线共用）
+KNOWN_CJK_FILES = {
+    "微软雅黑": ("msyh.ttc", "msyhbd.ttc"),
+    "宋体": ("simsun.ttc", "simsun.ttc"),
+    "黑体": ("simhei.ttf", "simhei.ttf"),
+    "等线": ("Deng.ttf", "Dengb.ttf"),
+    "仿宋": ("simfang.ttf", "simfang.ttf"),
+    "楷体": ("simkai.ttf", "simkai.ttf"),
 }
 
+# Backward-compatible override map. Entries may be extended by callers.
+FONT_FILES = {
+    "微软雅黑": "C:/Windows/Fonts/msyh.ttc",
+    "Microsoft YaHei": "C:/Windows/Fonts/msyh.ttc",
+    "宋体": "C:/Windows/Fonts/simsun.ttc",
+    "SimSun": "C:/Windows/Fonts/simsun.ttc",
+    "黑体": "C:/Windows/Fonts/simhei.ttf",
+    "SimHei": "C:/Windows/Fonts/simhei.ttf",
+    "等线": "C:/Windows/Fonts/Deng.ttf",
+    "Arial": "C:/Windows/Fonts/arial.ttf",
+}
 
 _FONT_WARNED = set()
 
 
-def font_file(font_name, warn=True):
-    """返回字体文件路径；找不到时回退到任意一个可用的系统字体。
-
-    ★ 回退是**静默失真**：量字宽用的是回退字体，与 Visio 里实际渲染的字体
-      不一致 → 折行行数 / 文字高度估算会偏，溢出可能漏报。
-      故 `warn=True`（默认）时，对**每个缺失字体只警告一次**（走 stderr，
-      不污染正常输出），提示溢出估算可能不准。
-    """
-    p = FONT_FILES.get(font_name)
-    if p and os.path.isfile(p):
-        return p
-    for cand in FONT_FILES.values():
-        if os.path.isfile(cand):
-            if warn and font_name not in _FONT_WARNED:
-                _FONT_WARNED.add(font_name)
-                import sys as _sys
-                print("  !! 字体 %r 无对应字体文件，已回退到 %s —— "
-                      "文字溢出估算可能不准（如需精确请补 theme.FONT_FILES）"
-                      % (font_name, os.path.basename(cand)), file=_sys.stderr)
-            return cand
+def font_file(font_name, warn=True, bold=False):
+    """Resolve the requested family; never silently measure with a random font."""
+    if isinstance(font_name, str) and font_name.strip('"').isdigit():
+        font_name = DEFAULT_CJK_FONT
+    path = FONT_FILES.get(font_name)
+    if path and not bold and os.path.isfile(path):
+        return path
+    if font_name in KNOWN_CJK_FILES and os.name == "nt":
+        regular, bold_name = KNOWN_CJK_FILES[font_name]
+        path = os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts",
+                            bold_name if bold else regular)
+        if os.path.isfile(path):
+            return path
+    path = _fs_font_file(font_name, bold=bold)
+    if path:
+        return path
+    if warn and font_name not in _FONT_WARNED:
+        _FONT_WARNED.add(font_name)
+        print("  !! 找不到字体 %r。请安装该字体，或配置 VISIO_FONT_*_FILE。" % font_name,
+              file=sys.stderr)
     return None
 
 
 class Theme(object):
     """一套配色。字段用 self.__dict__ 展开，便于任意扩展。"""
 
-    def __init__(self, name, font, **colors):
+    def __init__(self, name, font=None, latin_font=None, **colors):
         self.name = name
-        self.font = font
+        self.latin_font = latin_font or DEFAULT_LATIN_FONT
+        self.font = font or DEFAULT_CJK_FONT
         self.__dict__.update(colors)
 
     def c(self, key, default=None):
@@ -66,7 +79,7 @@ class Theme(object):
 
 # 正式技术文档（白底 + 柔和色块 + 深灰边框，2026-10-10 按用户截图风格化）
 TECH_CN = Theme(
-    "tech-cn", "微软雅黑",
+    "tech-cn", DEFAULT_CJK_FONT,
     black="RGB(62,63,63)",          # 图线主色（截图深灰 #3E3F3F）
     dark="RGB(38,38,38)",           # 正文说明文字
     gray="RGB(89,89,89)",           # 次要标注
@@ -83,7 +96,7 @@ TECH_CN = Theme(
 
 # 纯黑白灰 —— 需要严格黑白印刷时用
 MONO = Theme(
-    "mono", "微软雅黑",
+    "mono", DEFAULT_CJK_FONT,
     black="RGB(0,0,0)",
     dark="RGB(51,51,51)",
     gray="RGB(102,102,102)",
@@ -98,7 +111,7 @@ MONO = Theme(
 
 # 蓝色系 —— 汇报材料 / 幻灯片
 BLUE = Theme(
-    "blue", "微软雅黑",
+    "blue", DEFAULT_CJK_FONT,
     black="RGB(0,0,0)",
     dark="RGB(31,41,55)",
     gray="RGB(75,85,99)",
