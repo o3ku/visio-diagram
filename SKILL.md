@@ -33,7 +33,7 @@ python scripts/xml_backend/inspect_visio_docx.py out.docx               # 复查
 python -m unittest discover -s tests -v
 ```
 
-字体按操作系统取默认（Windows=Arial+微软雅黑 / macOS=Helvetica Neue+苹方 / Linux=fontconfig 检测），环境变量 `VISIO_FONT_LATIN/CJK`、`VISIO_FONT_*_FILE` 可覆盖。完整说明与已知限制见 **`references/cross-platform.md`**。以下为 COM 路线专属内容。
+字体按操作系统取默认（Windows=Arial+微软雅黑 / macOS=Helvetica Neue+苹方 / Linux=fontconfig 检测），环境变量 `VISIO_FONT_LATIN/CJK`、`VISIO_FONT_*_FILE` 可覆盖。XML 后端主题（默认 `tech-cn`，不写不变）：单图 `Fig(W, H, theme="mono")`，整批 `build_vsdx.py / build_docx.py --theme mono`。可选 `mono`（黑白印刷）；一份文档只用一套，主题只换颜色不换语义。完整说明与已知限制见 **`references/cross-platform.md`**。以下为 COM 路线专属内容。
 
 两条路线都适用于需要**精确控制版式**的中文工程文档配图。不适用于随手画示意图（那种场景用内联 SVG 更快）。
 
@@ -150,7 +150,6 @@ def main():
 |---|---|
 | `tech-cn` | 中文工程文档：黑白灰线 + 深蓝标题 + 外部对象灰底（**默认**） |
 | `mono` | 严格黑白印刷 |
-| `blue` | 汇报材料 / 幻灯片 |
 
 ### 第 3 步：自检 → 修 → 出图
 

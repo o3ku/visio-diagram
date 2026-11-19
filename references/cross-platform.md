@@ -34,6 +34,23 @@ python scripts/xml_backend/visio_finish.py out.docx --verify-only --report r.jso
 python scripts/xml_backend/visio_finish.py out.docx final.docx
 ```
 
+## 主题
+主题只换颜色，不换语义角色、版式、字号与连线规则；定义在 `scripts/theme.py` 的 `XML_PALETTES`，与 COM 主题共用注册表（`theme.py` 的 `THEMES`），两条路线同名同义。默认 `tech-cn`，不写主题时外观不变。
+
+| 主题 | 适用 | 主色 |
+|---|---|---|
+| `tech-cn`（默认） | 中文工程文档 | 深蓝 #1F3864 |
+| `mono` | 严格黑白印刷 | 全灰阶；ok/warn 只用填充深浅区分 |
+
+```python
+f = Fig(150, 70, theme="mono")   # 单图（黑白印刷）
+```
+```bash
+python scripts/xml_backend/build_docx.py 方案.docx work/figspecs.py work/templates out.docx --theme mono
+VISIO_THEME=mono python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/   # 环境变量也行
+```
+一份文档只用一套主题（见 `references/visio-style-rules.md` §6）。ok/warn 是语义色，除 mono 外各主题相同；每套主题的文字/填充对比度均 ≥ 4.5:1（见 `tests/test_xml_backend.py` 的对比度测试）。
+
 ## 文件
 - `vlib.py`：绘图 DSL（box / text / container / line / conn / legend），输出 Visio 页面 XML 与 PNG 预览；单位 mm，左上原点，Y 向下。
 - `vsdxpkg.py`：模板目录 + 新 page1.xml → vsdx，按图尺寸改页面大小。

@@ -9,6 +9,7 @@
 import argparse, importlib.util, os, re, shutil, sys, tempfile, zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vsdxpkg import BLANK, build_vsdx
+from vlib import list_themes, set_default_theme
 
 
 def load_figs(path):
@@ -28,7 +29,9 @@ def _write(p, s):
         fh.write(s)
 
 
-def build(src, figspecs, templates, out, preview=None):
+def build(src, figspecs, templates, out, preview=None, theme=None):
+    if theme:
+        set_default_theme(theme)
     figs = load_figs(figspecs)
     tmp = tempfile.mkdtemp(prefix='visio_xml_')
     try:
@@ -121,8 +124,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('src'); ap.add_argument('figspecs'); ap.add_argument('templates'); ap.add_argument('out')
     ap.add_argument('--preview', default=None, help='PNG 预览输出目录（默认临时目录，用完即删）')
+    ap.add_argument('--theme', default=None, choices=list_themes(),
+                    help='全图统一主题（默认 tech-cn；一份文档只用一套）')
     a = ap.parse_args(argv)
-    build(a.src, a.figspecs, a.templates, a.out, a.preview)
+    build(a.src, a.figspecs, a.templates, a.out, a.preview, theme=a.theme)
 
 
 if __name__ == '__main__':

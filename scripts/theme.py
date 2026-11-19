@@ -109,22 +109,76 @@ MONO = Theme(
     muted_fill="RGB(230,230,230)",
 )
 
-# 蓝色系 —— 汇报材料 / 幻灯片
-BLUE = Theme(
-    "blue", DEFAULT_CJK_FONT,
-    black="RGB(0,0,0)",
-    dark="RGB(31,41,55)",
-    gray="RGB(75,85,99)",
-    mgray="RGB(156,163,175)",
-    lgray="RGB(243,244,246)",
-    white="RGB(255,255,255)",
-    accent="RGB(21,94,169)",
-    accent_fill="RGB(219,234,254)",
-    lane="RGB(239,246,255)",
-    muted_fill="RGB(229,231,235)",
-)
+THEMES = {t.name: t for t in (TECH_CN, MONO)}
 
-THEMES = {t.name: t for t in (TECH_CN, MONO, BLUE)}
+
+# ---------------------------------------------------------------- XML 后端色板
+# 两条路线共用同一份主题注册：COM 用上面的 RGB(...) 字段，XML 用下面的十六进制
+# 色板。语义角色（node/key/dark/ext/ok/warn/soft…）在各主题里保持一致，只换颜色；
+# ok/warn 是语义色，除 mono（黑白印刷只能用灰阶深浅区分）外各主题相同。
+# tech-cn 的 XML 色板沿用 vlib.py 原有值（不改默认外观）。
+_OK = ("#E2F0D9", "#548235", 0, "#385723", 0, 9.0, 0.75)
+_WARN = ("#FBE5D6", "#C55A11", 0, "#843C0C", 0, 9.0, 0.75)
+
+XML_PALETTES = {
+    # 默认：中文工程文档（vlib.py 原有色板，原样保留）
+    "tech-cn": {
+        "styles": {
+            #        fill      line     dash  text     bold  size  lw
+            "node":  ("#FFFFFF", "#2E5C8A", 0, "#1A1A1A", 0, 9.0, 0.75),
+            "key":   ("#DCE8F5", "#2E5C8A", 0, "#1F3864", 1, 9.0, 0.75),
+            "dark":  ("#1F3864", "#1F3864", 0, "#FFFFFF", 1, 9.0, 0.75),
+            "ext":   ("#F2F2F2", "#7F7F7F", 1, "#404040", 0, 9.0, 0.75),
+            "ok":    _OK,
+            "warn":  _WARN,
+            "soft":  ("#F3F6FA", "#A6B9D0", 0, "#1F3864", 0, 8.5, 0.5),
+            "text":  (None, None, 0, "#1A1A1A", 0, 9.0, 0),
+            "title": (None, None, 0, "#1F3864", 1, 10.0, 0),
+            "note":  (None, None, 0, "#595959", 0, 8.0, 0),
+            "label": ("#FFFFFF", None, 0, "#404040", 0, 8.0, 0),
+            "band":  ("#2F5597", "#2F5597", 0, "#FFFFFF", 1, 9.0, 0.75),
+        },
+        "container_fill": "#F7F9FC", "container_line": "#8EA9C1",
+        "conn_line": "#2E5C8A", "conn_dashed": "#7F7F7F", "label_text": "#404040",
+    },
+    "mono": {
+        # 黑白印刷：全灰阶；ok/warn 只用填充深浅区分（浅灰=通过，深灰=异常）
+        "styles": {
+            "node":  ("#FFFFFF", "#000000", 0, "#000000", 0, 9.0, 0.75),
+            "key":   ("#DDDDDD", "#000000", 0, "#000000", 1, 9.0, 0.75),
+            "dark":  ("#000000", "#000000", 0, "#FFFFFF", 1, 9.0, 0.75),
+            "ext":   ("#F2F2F2", "#808080", 1, "#404040", 0, 9.0, 0.75),
+            "ok":    ("#E6E6E6", "#404040", 0, "#000000", 0, 9.0, 0.75),
+            "warn":  ("#BFBFBF", "#000000", 0, "#000000", 0, 9.0, 0.75),
+            "soft":  ("#F5F5F5", "#A6A6A6", 0, "#000000", 0, 8.5, 0.5),
+            "text":  (None, None, 0, "#000000", 0, 9.0, 0),
+            "title": (None, None, 0, "#000000", 1, 10.0, 0),
+            "note":  (None, None, 0, "#595959", 0, 8.0, 0),
+            "label": ("#FFFFFF", None, 0, "#404040", 0, 8.0, 0),
+            "band":  ("#000000", "#000000", 0, "#FFFFFF", 1, 9.0, 0.75),
+        },
+        "container_fill": "#FAFAFA", "container_line": "#808080",
+        "conn_line": "#000000", "conn_dashed": "#808080", "label_text": "#404040",
+    },
+}
+
+
+def xml_palette(name="tech-cn"):
+    """XML 后端用的色板（含 styles 与容器/连线颜色）；名字与 COM 主题共用注册表。"""
+    if isinstance(name, Theme):
+        name = name.name
+    if name not in XML_PALETTES:
+        raise KeyError("未知主题 %r，可选：%s" % (name, sorted(XML_PALETTES)))
+    pal = XML_PALETTES[name]
+    return {"styles": dict(pal["styles"]),
+            "container_fill": pal["container_fill"], "container_line": pal["container_line"],
+            "conn_line": pal["conn_line"], "conn_dashed": pal["conn_dashed"],
+            "label_text": pal["label_text"]}
+
+
+def xml_styles(name="tech-cn"):
+    """XML 后端用的样式表（vlib STYLES 的格式），默认 tech-cn。"""
+    return xml_palette(name)["styles"]
 
 
 def get(name="tech-cn"):
