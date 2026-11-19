@@ -178,9 +178,14 @@ def check_drawing(app, path, exp, move_mm, verify_only, out_vsdx, out_emf):
         # 6. 导出 EMF（临时透明页框，固定图幅）
         if out_emf:
             W, H = pg.PageSheet.CellsU('PageWidth').ResultIU, pg.PageSheet.CellsU('PageHeight').ResultIU
+            # ★ Page.Export 的 EMF 按「内容并集」裁剪，透明页框救不了（实测 2026-11-19）：
+            #   内容并集比 ≠ 页面比时，按页面设置的 Word 显示框会把 EMF 压扁。
+            #   修法：画一个覆盖整页的**白色不透明**矩形垫底（有填充才扩大导出范围），
+            #   导出后删除 —— EMF 图幅 = 页面，比例即页面比。
             fr = pg.DrawRectangle(0, 0, W, H)
             fr.CellsU('LinePattern').FormulaU = '0'
-            fr.CellsU('FillPattern').FormulaU = '0'
+            fr.CellsU('FillPattern').FormulaU = '1'
+            fr.CellsU('FillForegnd').FormulaU = 'RGB(255,255,255)'
             pg.Export(out_emf)
             fr.Delete()
             a, pa = emf_aspect(out_emf), W / H

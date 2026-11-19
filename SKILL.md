@@ -1,18 +1,41 @@
 ---
 name: visio-diagram
 version: "1.0.1-beta"
-description: 通过 COM 驱动本机 Visio 绘制矢量图，并嵌入 Word 文档。当用户要求画架构图 / 流程图 / 泳道图 / 模块关系图 / 数据流向图，或要求把图嵌入 docx，或提到 Visio、vsdx、EMF 矢量图、技术方案配图、总体设计方案插图时使用。适用于中文工程技术文档配图（总体设计方案、技术方案、试验大纲、研究报告），产出原生可编辑的 .vsdx 加矢量 .emf 与预览 .png，并自带文字溢出自检与 docx 版式核对。
+description: 跨平台生成原生可编辑 Visio 图并嵌入 Word 文档。无 Visio 环境（Linux/macOS/CI/沙箱）用 XML 后端直接产出可编辑 .vsdx + PNG 预览并写回 docx；Windows 装有 Visio 时可用 COM 路线产出矢量 .emf。当用户要求画架构图 / 流程图 / 泳道图 / 模块关系图 / 数据流向图，或要求把图嵌入 docx，或提到 Visio、vsdx、技术方案配图、总体设计方案插图时使用。适用于中文工程技术文档配图，自带文字溢出自检与 docx 版式核对。
 agent_created: true
 ---
 
-# Visio 矢量绘图与文档嵌图
+# Visio 绘图与文档嵌图
 
-## 用途
+## 两条路线（先选对再开工）
 
-用 Python + pywin32 驱动本机 Visio，程序化生成**原生可编辑**的矢量图，并嵌入 Word 文档。
-产出三件套：`.vsdx`（原生，可继续在 Visio 里改）· `.emf`（矢量，供 Word/PPT 嵌入）· `.png`（预览）。
+| 场景 | 用哪条 | 入口 |
+|---|---|---|
+| 无 Visio（Linux / macOS / CI / Agent 沙箱） | **XML 后端**：纯 Python 生成可编辑 vsdx + PNG 预览，可写回 docx | `scripts/xml_backend/`，见 `references/cross-platform.md` |
+| Windows + 桌面版 Visio，需要矢量 EMF 或 Visio 实时渲染 | **COM 路线**：驱动本机 Visio，产出 `.vsdx` + 矢量 `.emf` + `.png` 三件套 | `scripts/visio_lib.py`（本文余下章节） |
+| Windows + Visio，要验证 XML 后端产物 | 组合：XML 后端生成 → `visio_finish.py` 验证/收尾（重算、导出 EMF） | `scripts/xml_backend/visio_finish.py` |
 
-适用于需要**精确控制版式**的中文工程文档配图。不适用于随手画示意图（那种场景用内联 SVG 更快）。
+★ 判断口诀：**本机有没有 VISIO.EXE**。没有就走 XML 后端（别试图装 COM 依赖）；有且要 EMF 才走 COM。
+XML 后端产物同样是原生可编辑 Visio 对象（连接点、粘附公式、连线自带文本齐全），差别只在预览是 PNG 而非矢量 EMF。
+
+### XML 后端速览（跨平台，30 秒上手）
+
+```bash
+pip install pillow
+# 1) 独立 vsdx + PNG 预览（照 assets/example_xml_flowchart.py 写 FIGS）
+python scripts/xml_backend/build_vsdx.py assets/example_xml_flowchart.py out/
+# 2) 重绘 docx 里已有的嵌入 Visio 图（原稿只读，无需 Word/Visio）
+python scripts/xml_backend/inspect_visio_docx.py 方案.docx              # 诊断现状
+python scripts/xml_backend/extract_vsdx.py 方案.docx work/templates     # 解出逐图模板
+python scripts/xml_backend/build_docx.py 方案.docx work/figspecs.py work/templates out.docx
+python scripts/xml_backend/inspect_visio_docx.py out.docx               # 复查
+# 3) 测试（不需要 Visio）
+python -m unittest discover -s tests -v
+```
+
+字体按操作系统取默认（Windows=Arial+微软雅黑 / macOS=Helvetica Neue+苹方 / Linux=fontconfig 检测），环境变量 `VISIO_FONT_LATIN/CJK`、`VISIO_FONT_*_FILE` 可覆盖。完整说明与已知限制见 **`references/cross-platform.md`**。以下为 COM 路线专属内容。
+
+两条路线都适用于需要**精确控制版式**的中文工程文档配图。不适用于随手画示意图（那种场景用内联 SVG 更快）。
 
 ## 何时使用
 
@@ -30,7 +53,7 @@ agent_created: true
 
 ---
 
-## 前置检查（每次开工前先做）
+## 前置检查（COM 路线，每次开工前先做）
 
 ```bash
 # 1) Visio 是否安装
@@ -60,13 +83,13 @@ uv venv --python 3.12 .venv-vision && .venv-vision/Scripts/pip install pywin32 p
 .venv-vision/Scripts/python scripts/selftest.py
 ```
 
-**没有 Visio 的环境**（Linux / macOS、CI、Agent 沙箱）：改用 `scripts/xml_backend/`，直接生成可编辑的 vsdx 并写回 docx，见 `references/cross-platform.md`。
+**没有 Visio 的环境**：回到顶部「XML 后端速览」，或见 `references/cross-platform.md`。
 
 **PowerShell 无法实例化 COM**（安全策略拦截）—— 必须走 Python。详见 `references/pitfalls.md` 第 1 条。
 
 ---
 
-## 工作流
+## 工作流（COM 路线）
 
 ### 第 1 步：确定画幅
 
@@ -319,6 +342,8 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
 | 文件 | 用途 |
 |---|---|
 | `visio_lib.py` | 绘图引擎：`VDraw` 类（支持 `with`，退出自动 close）+ `text_extent_mm()` 字体度量 + `check_env()` 环境前置检查 |
+| `xml_backend/` | **跨平台 XML 后端**：`vlib.py` 绘图 DSL → 可编辑 vsdx + PNG；`build_vsdx.py` / `build_docx.py` / `extract_vsdx.py` / `inspect_visio_docx.py` / `visio_finish.py`（Windows 验证收尾）。见 `references/cross-platform.md` |
+| `font_support.py` | 跨平台默认字体（Windows=Arial+微软雅黑 / macOS=Helvetica Neue+苹方 / Linux=fontconfig），两条路线共用；`VISIO_FONT_*` 环境变量覆盖 |
 | `theme.py` | 三套配色主题 + 字体文件映射 |
 | `docx_embed.py` | `emf_size_mm()` 读 EMF 图幅 · `content_column_mm()` 算正文栏宽（**默认取末节、支持多栏折算**）· `ensure_content_type()` 补声明 |
 | `word_insert.py` | 路线 A：Word COM 按占位符插图（含命令行） |
@@ -335,12 +360,15 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
 | `cells-reference.md` | Visio CellsU 属性速查、坐标换算公式、编号取值 |
 | `pitfalls.md` | 29 条避坑清单（COM 沙箱、TextBounds 不存在、溢出、1:1、装订线、EMF 尺寸、COM 忙错误、箭头漂移、折点压邻居框、**OLE 图幅被压扁**、**残留 VISIO.EXE 致 OLE 嵌旧内容**、**连接点 Y 向上致 fy 颠倒**、**折线几何须平移进包围盒**、**单条折线连接线配方**、**文字并入宿主**、**上下相邻框连线端点选边**、**连接线自带文本 label=**、**选中折线出现矩形外框（根因 `Misc.ObjType` 未设为 2）**、**图例 `legend()` 忽略 w 致右侧一大片空白**、**连线标签离老远 —— 绝对坐标/并入不贴线**、**图变扁/比例不对 —— 先做三方对照（显示框·bounds·vsdx）**、**Word 存档把 72pt 规范化成 1in**、**静态 EMF 图文字被裁只能整张重绘**、**居中 / 目录页码这两个测量本身的坑**…） |
 | `docx-embed.md` | 两条嵌图路线 + 三个 OOXML 坑的完整修复代码 |
+| `cross-platform.md` | XML 后端完整说明：与 COM 分工、用法、字体、已知限制 |
+| `visio-style-rules.md` | 图稿风格规则与审查清单（版式 / 连线 / 字号 / 配色） |
 
 ### assets/
 
 | 文件 | 内容 |
 |---|---|
 | `example_flowchart.py` | 最小可运行示例（约 60 行画一张带闭环与图例的流程图），照抄改内容即可 |
+| `example_xml_flowchart.py` | XML 后端最小示例（跨平台，无需 Visio），照抄写 FIGS 即可 |
 
 ---
 
@@ -348,6 +376,8 @@ Word 实测：页数、**最宽表格 vs 栏宽**、每张图尺寸、表格内�
 
 | 现象 | 原因 | 位置 |
 |---|---|---|
+| Linux/macOS 上 `import visio_lib` 报缺 pywin32 | 走了 COM 路线；改用 XML 后端（见顶部速览） | `cross-platform.md` |
+| XML 后端找不到中文字体 | 按系统装 CJK 字体，或设 `VISIO_FONT_CJK_FILE` | `cross-platform.md` §字体 |
 | COM 实例化被拒 | PowerShell 策略拦截 | `pitfalls.md` §1 |
 | `TextBounds` AttributeError | 该 API 不存在 | `pitfalls.md` §2 |
 | 导出后文字跑出框外 | Visio 不报错，需自检 | `pitfalls.md` §3 |

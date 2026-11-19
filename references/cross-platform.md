@@ -52,6 +52,6 @@ python scripts/xml_backend/visio_finish.py out.docx final.docx
 - 只做整页重绘，不在原图上局部修改，也不处理主控形状、主题继承和模具。
 - 连线是带显式几何行的 1-D 形状，每个几何点都写公式：拖动时端点和线身一起跟随，中间折点按比例伸缩但不会自动重新走线（与 COM 后端的 connect() 一致）。
 - 复杂公式的缓存值由脚本计算，建议有条件时用 `visio_finish.py --verify-only` 核对。
-- `visio_finish.py` 的 COM 部分尚未在真实 Visio 上回归，docx 读写部分已测试。
+- `visio_finish.py` 已在真实 Visio 上回归（2026-11-19，Visio Pro + Win10）：粘附核对 / 拖动测试 / 缓存值 / EMF 导出 / 回写全链通过；EMF 导出按「白色不透明页框垫底」保证图幅=页面（透明框不扩大导出范围）。
 
 完整的风格规则与审查清单见 `references/visio-style-rules.md`。
